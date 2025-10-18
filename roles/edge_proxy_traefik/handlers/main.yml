@@ -1,0 +1,6 @@
+---
+- name: Reload Traefik
+  when: traefik_manage_service
+  ansible.builtin.command:
+    cmd: "{{ traefik_reload_command }}"
+  changed_when: false

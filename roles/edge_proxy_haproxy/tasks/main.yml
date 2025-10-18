@@ -1,0 +1,9 @@
+---
+- name: Render HAProxy ingress configuration
+  template:
+    src: haproxy.cfg.j2
+    dest: "{{ haproxy_config_path }}"
+    owner: "{{ haproxy_config_owner }}"
+    group: "{{ haproxy_config_group }}"
+    mode: "{{ haproxy_config_mode }}"
+  notify: Reload HAProxy

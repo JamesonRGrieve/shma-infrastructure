@@ -1,0 +1,5 @@
+---
+- name: Reload HAProxy
+  ansible.builtin.command:
+    cmd: "{{ haproxy_reload_command }}"
+  changed_when: false

@@ -1,0 +1,8 @@
+---
+traefik_dynamic_config_dir: /etc/traefik/dynamic
+traefik_config_owner: root
+traefik_config_group: root
+traefik_config_mode: "0640"
+traefik_config_file: "{{ traefik_dynamic_config_dir }}/ingress.yml"
+traefik_reload_command: "systemctl reload traefik"
+traefik_manage_service: true
