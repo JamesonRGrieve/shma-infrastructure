@@ -1,0 +1,8 @@
+---
+opnsense_caddy_api_scheme: "{{ opnsense_api_scheme | default('https') }}"
+opnsense_caddy_api_host: "{{ opnsense_api_host | default(inventory_hostname) }}"
+opnsense_caddy_api_port: "{{ opnsense_api_port | default(443) }}"
+opnsense_caddy_api_key: "{{ opnsense_api_key | default('') }}"
+opnsense_caddy_api_secret: "{{ opnsense_api_secret | default('') }}"
+opnsense_caddy_api_verify_ssl: "{{ opnsense_api_verify_ssl | default(true) }}"
+opnsense_caddy_apply_changes: "{{ opnsense_apply_changes | default(true) }}"

@@ -16,7 +16,7 @@ properties:
       required:
         - host
         - port
-      additionalProperties: true
+      additionalProperties: false
       properties:
         host:
           type: string

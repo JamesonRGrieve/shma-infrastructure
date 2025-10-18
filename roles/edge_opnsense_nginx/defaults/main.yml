@@ -1,0 +1,10 @@
+---
+opnsense_nginx_api_scheme: "{{ opnsense_api_scheme | default('https') }}"
+opnsense_nginx_api_host: "{{ opnsense_api_host | default(inventory_hostname) }}"
+opnsense_nginx_api_port: "{{ opnsense_api_port | default(443) }}"
+opnsense_nginx_api_key: "{{ opnsense_api_key | default('') }}"
+opnsense_nginx_api_secret: "{{ opnsense_api_secret | default('') }}"
+opnsense_nginx_api_verify_ssl: "{{ opnsense_api_verify_ssl | default(true) }}"
+opnsense_nginx_apply_changes: "{{ opnsense_apply_changes | default(true) }}"
+opnsense_nginx_tls_certificate_id: "{{ opnsense_tls_certificate_id | default(None) }}"
+opnsense_nginx_listen_addresses: "{{ opnsense_ingress_bind_addresses | default([{'address': '0.0.0.0', 'port': 80, 'tls': false}, {'address': '0.0.0.0', 'port': 443, 'tls': true}]) }}"

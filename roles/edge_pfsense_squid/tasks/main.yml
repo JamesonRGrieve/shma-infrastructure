@@ -1,0 +1,70 @@
+---
+- name: Ensure pfSense API token is provided for Squid
+  ansible.builtin.assert:
+    that:
+      - pfsense_squid_api_token | length > 0
+    fail_msg: "pfsense_squid_api_token must be provided to configure pfSense Squid"
+
+- name: Initialize pfSense Squid payload containers
+  ansible.builtin.set_fact:
+    pfsense_squid_peers: []
+    pfsense_squid_mappings: []
+
+- name: Build pfSense Squid peer definitions
+  ansible.builtin.set_fact:
+    pfsense_squid_peers: "{{ pfsense_squid_peers + [ peer_payload ] }}"
+  loop: "{{ edge_ingress_backends | default([]) }}"
+  loop_control:
+    loop_var: edge_backend
+  vars:
+    peer_payload: >-
+      {{ {
+        'name': edge_backend.service_id,
+        'host': edge_backend.exports.APP_BACKEND_IP,
+        'port': edge_backend.exports.APP_PORT,
+        'originserver': True,
+        'ssl': edge_backend.scheme == 'https'
+      } | to_json | from_json }}
+
+- name: Build pfSense Squid reverse proxy mappings
+  ansible.builtin.set_fact:
+    pfsense_squid_mappings: "{{ pfsense_squid_mappings + [ mapping_payload ] }}"
+  loop: "{{ edge_ingress_backends | default([]) }}"
+  loop_control:
+    loop_var: edge_backend
+  vars:
+    mapping_payload: >-
+      {{ {
+        'servername': edge_backend.exports.APP_FQDN,
+        'path': edge_backend.path_prefix if edge_backend.path_prefix != '/' else '/',
+        'peer': edge_backend.service_id,
+        'tls': edge_backend.tls | default(False)
+      } | to_json | from_json }}
+
+- name: Push Squid reverse proxy configuration to pfSense
+  ansible.builtin.uri:
+    url: "{{ pfsense_squid_api_scheme }}://{{ pfsense_squid_api_host }}:{{ pfsense_squid_api_port }}/api/v1/services/squid/reverse_proxy"
+    method: POST
+    headers:
+      Authorization: "{{ pfsense_squid_api_token }}"
+    validate_certs: "{{ pfsense_squid_api_verify_ssl }}"
+    body_format: json
+    status_code: 200
+    body:
+      peers: {{ pfsense_squid_peers }}
+      mappings: {{ pfsense_squid_mappings }}
+  register: pfsense_squid_result
+  no_log: true
+
+- name: Apply Squid configuration on pfSense
+  when: pfsense_squid_apply_changes | bool
+  ansible.builtin.uri:
+    url: "{{ pfsense_squid_api_scheme }}://{{ pfsense_squid_api_host }}:{{ pfsense_squid_api_port }}/api/v1/services/squid/apply"
+    method: POST
+    headers:
+      Authorization: "{{ pfsense_squid_api_token }}"
+    validate_certs: "{{ pfsense_squid_api_verify_ssl }}"
+    status_code: 200
+    body_format: json
+    body: {}
+  no_log: true

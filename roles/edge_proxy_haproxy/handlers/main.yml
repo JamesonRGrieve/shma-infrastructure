@@ -1,5 +1,12 @@
 ---
+- name: Validate HAProxy configuration
+  listen: Apply HAProxy configuration
+  ansible.builtin.command:
+    cmd: "{{ haproxy_validate_command }}"
+  changed_when: false
+
 - name: Reload HAProxy
+  listen: Apply HAProxy configuration
   ansible.builtin.command:
     cmd: "{{ haproxy_reload_command }}"
   changed_when: false

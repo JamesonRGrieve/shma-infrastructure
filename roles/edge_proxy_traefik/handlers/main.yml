@@ -1,6 +1,14 @@
 ---
+- name: Validate Traefik configuration
+  listen: Apply Traefik configuration
+  when: traefik_validate_before_reload | bool
+  ansible.builtin.command:
+    cmd: "{{ traefik_validate_command }}"
+  changed_when: false
+
 - name: Reload Traefik
-  when: traefik_manage_service
+  listen: Apply Traefik configuration
+  when: traefik_manage_service | bool
   ansible.builtin.command:
     cmd: "{{ traefik_reload_command }}"
   changed_when: false

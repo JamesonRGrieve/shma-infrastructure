@@ -1,4 +1,4 @@
 ---
-ingress_schema_path: "{{ role_path | path_join('../../schemas/ingress.schema.yml') }}"
+ingress_schema_path: "{{ role_path }}/../../schemas/ingress.schema.yml"
 ingress_managed_by: acme.runtime
 ingress_owner: null

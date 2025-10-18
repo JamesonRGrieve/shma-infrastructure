@@ -4,6 +4,7 @@
   slurp:
     src: "{{ edge_ingress_contract.exports_env_path }}"
   register: edge_ingress_contract_exports_env
+  no_log: true
 
 - name: Determine ingress exports for {{ edge_ingress_contract.service_id | default('unnamed service') }}
   set_fact:
@@ -13,6 +14,7 @@
         if edge_ingress_contract.exports is defined
         else (edge_ingress_contract_exports_env.content | b64decode | parse_ingress_exports(edge_ingress_required_keys | tuple))
       }}
+  no_log: true
 
 - name: Merge ingress defaults for {{ edge_ingress_contract.service_id | default('unnamed service') }}
   set_fact:
