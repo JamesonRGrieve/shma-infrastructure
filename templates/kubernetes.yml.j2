@@ -2,7 +2,8 @@
 {% set namespace = service_namespace | default('default') %}
 {% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] %}
 {% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
-{% set secret_name = svc_name + '-secrets' %}
+{% set env_secret_name = svc_name + '-env' %}
+{% set file_secret_name = svc_name + '-files' %}
 {% set health_cmd = health.cmd | default(['true']) %}
 {% set health_interval_seconds = (health.interval | default('10s')) | regex_replace('s$', '') | int %}
 {% set health_timeout_seconds = (health.timeout | default('5s')) | regex_replace('s$', '') | int %}
@@ -25,20 +26,32 @@
 {% set storage_size = '1Gi' %}
 {% endif %}
 {% set volume_mount_path = volume_config.target if volume_config is mapping and volume_config.target is defined else '/data' %}
+{% if secret_env %}
 ---
 apiVersion: v1
 kind: Secret
 metadata:
-  name: {{ secret_name }}
+  name: {{ env_secret_name }}
   namespace: {{ namespace }}
 type: Opaque
 stringData:
 {% for item in secret_env %}
   {{ item.name }}: {{ item.value | to_json }}
 {% endfor %}
+{% endif %}
+{% if file_secrets %}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ file_secret_name }}
+  namespace: {{ namespace }}
+type: Opaque
+stringData:
 {% for secret in file_secrets %}
   {{ secret.name }}: {{ (secret.value | default(secret.content) | default('', true)) | to_json }}
 {% endfor %}
+{% endif %}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -75,7 +88,7 @@ spec:
             - name: {{ item.name }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ secret_name }}
+                  name: {{ env_secret_name }}
                   key: {{ item.name }}
 {% endfor %}
 {% for item in service_env | default([]) %}
@@ -130,7 +143,7 @@ spec:
 {% if file_secrets %}
         - name: secret-files
           secret:
-            secretName: {{ secret_name }}
+            secretName: {{ file_secret_name }}
             items:
 {% for secret in file_secrets %}
               - key: {{ secret.name }}

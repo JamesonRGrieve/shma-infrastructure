@@ -4,14 +4,17 @@ Render Kubernetes manifests with Secret integration, readiness probes, and resou
 
 ## Updates
 
-- `templates/kubernetes.yml.j2` generates a single Secret that stores both environment variables and file-based secrets.
-- Containers mount secret files via a dedicated volume and consume environment variables via `valueFrom`.
+- `templates/kubernetes.yml.j2` separates environment and file secrets (`<service_id>-env` and `<service_id>-files`).
+- Containers mount secret files via a dedicated volume and consume environment variables via `valueFrom` pointing to the env Secret.
 - Liveness and readiness probes originate from `health.cmd`, keeping checks consistent across runtimes.
 
 ## Prerequisites
 
 ```bash
-curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+KUBECTL_VERSION=v1.29.3
+curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256"
+echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check -
 chmod +x kubectl
 sudo mv kubectl /usr/local/bin/
 ansible-galaxy collection install kubernetes.core
@@ -21,7 +24,7 @@ ansible-galaxy collection install kubernetes.core
 
 `templates/kubernetes.yml.j2` emits:
 
-- `Secret` – named `<service_id>-secrets`, containing keys for every `secrets.env` entry plus file secrets.
+- `Secret` – named `<service_id>-env` and `<service_id>-files`, containing env vars and file-backed secrets respectively.
 - `PersistentVolumeClaim` – sized from `service_storage_gb` or `service_storage_size`.
 - `Deployment` – references the Secret for env vars, mounts secret files, and configures probes/resources.
 - `Service` – exposes declared `service_ports` within the cluster.
@@ -42,7 +45,7 @@ spec:
             - name: SAMPLE_SERVICE_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: sample-service-secrets
+                  name: sample-service-env
                   key: SAMPLE_SERVICE_TOKEN
           volumeMounts:
             - name: secret-files
@@ -67,10 +70,11 @@ Render and validate locally:
 ```bash
 ansible-playbook tests/render.yml -e runtime=kubernetes -e @tests/sample_service.yml
 kubectl apply --dry-run=client --validate=true -f /tmp/ansible-runtime/sample-service/kubernetes.yml
+kubectl apply --dry-run=server --validate=true -f /tmp/ansible-runtime/sample-service/kubernetes.yml
 ```
 
 ## Deployment tips
 
 - Ensure the referenced namespace (`k8s_namespace`) exists before applying.
-- Consider separate Secrets when mounting large binary blobs; extend `secrets.files` as needed.
+- Adjust secret naming conventions through the template if a workload requires different boundaries (for example, per-mount Secrets).
 - Adjust `service_replicas` to scale deployments and rely on the readiness probe before routing traffic.

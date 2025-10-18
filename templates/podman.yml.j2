@@ -11,6 +11,8 @@
 {% set ports = service_ports | default((service_port is defined) | ternary([service_port], [])) %}
 {% set volumes = service_volumes | default([]) %}
 {% set inline_env = service_env | default([]) %}
+{% set autoupdate_enabled = service_autoupdate | default(false) %}
+{% set autoupdate_mode = service_autoupdate_mode | default('registry') %}
 [Unit]
 Description={{ service_unit_description | default('Managed container for ' ~ (service_name | default(service_id))) }}
 After=network-online.target
@@ -19,7 +21,9 @@ Wants=network-online.target
 [Container]
 Image={{ service_image }}
 ContainerName={{ service_name | default(service_id) }}
-AutoUpdate=registry
+{% if autoupdate_enabled %}
+AutoUpdate={{ autoupdate_mode }}
+{% endif %}
 {% for env in inline_env %}
 Environment={{ env.name }}={{ env.value }}
 {% endfor %}

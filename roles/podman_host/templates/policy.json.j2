@@ -1,16 +1,1 @@
-{
-  "default": [
-    {
-      "type": "insecureAcceptAnything"
-    }
-  ],
-  "transports": {
-    "docker-daemon": {
-      "": [
-        {
-          "type": "insecureAcceptAnything"
-        }
-      ]
-    }
-  }
-}
+{{ podman_host_policy | to_nice_json }}

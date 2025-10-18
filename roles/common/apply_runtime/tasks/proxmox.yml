@@ -3,6 +3,14 @@
   set_fact:
     lxc_config: "{{ lookup('file', runtime_config_path) | from_yaml }}"
 
+- name: Ensure Proxmox API token credentials are provided
+  assert:
+    that:
+      - proxmox_api_user is defined
+      - proxmox_api_token_id is defined
+      - proxmox_api_token_secret is defined
+    fail_msg: "Proxmox runtime requires proxmox_api_user, proxmox_api_token_id, and proxmox_api_token_secret"
+
 - name: Ensure container_ip is defined
   assert:
     that:
@@ -21,7 +29,8 @@
     hostname: "{{ lxc_config.container.hostname }}"
     node: "{{ proxmox_node }}"
     api_user: "{{ proxmox_api_user }}"
-    api_password: "{{ proxmox_api_password }}"
+    api_token_id: "{{ proxmox_api_token_id }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
     api_host: "{{ proxmox_api_host }}"
     ostemplate: "{{ lxc_config.container.ostemplate }}"
     disk: "{{ lxc_config.container.disk }}"
@@ -31,7 +40,7 @@
     netif: "{{ lxc_config.container.netif }}"
     onboot: "{{ lxc_config.container.onboot }}"
     unprivileged: "{{ lxc_config.container.unprivileged }}"
-    features: "{{ lxc_config.container.features | default('nesting=1,keyctl=1') }}"
+    features: {{ lxc_config.container.features | default(omit) }}
     state: present
 
 - name: Start container
@@ -39,7 +48,8 @@
     vmid: "{{ lxc_config.container.vmid }}"
     node: "{{ proxmox_node }}"
     api_user: "{{ proxmox_api_user }}"
-    api_password: "{{ proxmox_api_password }}"
+    api_token_id: "{{ proxmox_api_token_id }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
     api_host: "{{ proxmox_api_host }}"
     state: started
 
@@ -49,13 +59,24 @@
     port: 22
     timeout: 120
 
-- name: Install packages in container
+- name: Update package cache in container when packages are requested
   delegate_to: "{{ container_ip }}"
   become: true
   apt:
-    name: "{{ lxc_config.setup.packages | default([]) }}"
-    state: present
     update_cache: yes
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  when: lxc_config.setup.packages is defined and lxc_config.setup.packages | length > 0
+
+- name: Install pinned packages in container
+  delegate_to: "{{ container_ip }}"
+  become: true
+  apt:
+    name: "{{ (item.name if item is mapping else item) ~ (('=' ~ item.version) if item is mapping and item.version is defined else '') }}"
+    state: "{{ item.state | default('present') if item is mapping else 'present' }}"
+  loop: "{{ lxc_config.setup.packages | default([]) }}"
+  loop_control:
+    label: "{{ item.name if item is mapping else item }}"
   environment:
     DEBIAN_FRONTEND: noninteractive
   when: lxc_config.setup.packages is defined and lxc_config.setup.packages | length > 0

@@ -3,6 +3,15 @@
   ansible.builtin.set_fact:
     hardening_package_target: "{{ hardening_packages_common.get(ansible_distribution, hardening_packages_common.get(ansible_os_family, [])) }}"
 
+- name: Extend package set for Cockpit when enabled
+  ansible.builtin.set_fact:
+    hardening_package_target: "{{ (hardening_package_target + cockpit_packages) | unique }}"
+  vars:
+    cockpit_packages: "{{ hardening_cockpit_packages_map.get(ansible_distribution, hardening_cockpit_packages_map.get(ansible_os_family, [])) }}"
+  when:
+    - hardening_enable_cockpit | bool
+    - cockpit_packages | length > 0
+
 - name: Ensure base hardening packages are installed
   ansible.builtin.package:
     name: "{{ hardening_package_target }}"
@@ -67,16 +76,6 @@
     mode: '0440'
   notify: Validate sudoers configuration
 
-- name: Configure sudo cockpit exception
-  ansible.builtin.copy:
-    dest: /etc/sudoers.d/cockpit
-    content: |-
-      Defaults:cockpit !authenticate
-    owner: root
-    group: root
-    mode: '0440'
-  notify: Validate sudoers configuration
-
 - name: Require TTY for sudo invocations
   ansible.builtin.copy:
     dest: /etc/sudoers.d/requiretty
@@ -121,3 +120,37 @@
     state: stopped
   loop: "{{ (hardening_disable_services + hardening_additional_disable_services) | unique }}"
   ignore_errors: true
+
+- name: Ensure Cockpit socket is disabled when Cockpit is not enabled
+  ansible.builtin.systemd:
+    name: cockpit.socket
+    enabled: false
+    state: stopped
+    daemon_reload: true
+  when: not hardening_enable_cockpit
+  failed_when: false
+  ignore_errors: true
+
+- name: Remove Cockpit socket overrides when Cockpit is disabled
+  ansible.builtin.file:
+    path: /etc/systemd/system/cockpit.socket.d
+    state: absent
+  when: not hardening_enable_cockpit
+
+- name: Ensure Cockpit socket override directory exists when enabled
+  ansible.builtin.file:
+    path: /etc/systemd/system/cockpit.socket.d
+    state: directory
+    mode: '0755'
+  when: hardening_enable_cockpit
+
+- name: Configure Cockpit bind address override
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/cockpit.socket.d/listen.conf
+    mode: '0644'
+    content: |-
+      [Socket]
+      ListenStream=
+      ListenStream={{ hardening_cockpit_bind_address }}:9090
+  when: hardening_enable_cockpit
+  notify: Reload cockpit socket

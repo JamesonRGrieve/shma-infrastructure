@@ -5,7 +5,7 @@ A runtime-agnostic infrastructure-as-code framework for deploying self-hosted ap
 ## Key Features
 
 - **Write Once, Deploy Anywhere** – render the same service definition into runtime-specific manifests and unit files.
-- **Portable Secrets Handling** – ship environment and file-based secrets with runtime-appropriate permissions, optionally shredding rendered material after adapters finish.
+- **Portable Secrets Handling** – ship environment and file-based secrets with runtime-appropriate permissions, shredding rendered material after adapters finish unless explicitly disabled.
 - **Declarative Service Exports** – advertise connection details (for example URLs, ports, or credentials) through `exports.env` so downstream apps can consume them without service-specific wiring in this repository.
 - **Unified Health Contract** – a single `health.cmd` drives Compose healthchecks, Quadlet probes, Kubernetes readiness/liveness probes, and a post-deploy gate.
 - **Continuous Validation** – GitHub Actions lint Ansible/YAML, render every runtime, and verify the generated artifacts with the runtime CLIs.
@@ -15,7 +15,7 @@ A runtime-agnostic infrastructure-as-code framework for deploying self-hosted ap
 ### Install toolchain
 
 ```bash
-pip install ansible ansible-lint yamllint jsonschema pyyaml
+pip install -r ci/requirements.txt
 ansible-galaxy collection install -r ci/collections-stable.yml
 ```
 
@@ -48,6 +48,8 @@ runtime_templates:
   kubernetes: templates/kubernetes.yml.j2
   baremetal: templates/baremetal.yml.j2
 
+service_image: docker.io/library/nginx@sha256:4cdc4c8f840c98c47404108002c658d2d44df83228c166a4630bf4161eee7bc6
+
 exports:
   env:
     - name: SAMPLE_SERVICE_URL
@@ -55,7 +57,6 @@ exports:
       description: Base URL consumers should call.
 
 secrets:
-  shred_after_apply: true
   env:
     - name: SAMPLE_SERVICE_TOKEN
       value: "{{ sample_service_token }}"
@@ -87,10 +88,14 @@ service_env:
 
 The registry keeps validation decoupled from the Ansible inventory while ensuring every declared dependency is fulfilled by an exported contract.
 
+All container references must be pinned by digest (`<image>@sha256:<digest>`) so manifests remain reproducible across runtimes.
+
 ## Additional Options
 
 - `quadlet_scope` – set to `system` (default) or `user` to control where Quadlet units are installed. When using `quadlet_scope: user`, make sure lingering is enabled for the target user or user services are explicitly started at boot.
-- `secrets.shred_after_apply` – remove rendered secret files and env files immediately after the runtime adapter applies changes, leaving only in-memory material behind.
+- `secrets.shred_after_apply` – remove rendered secret files and env files immediately after the runtime adapter applies changes (enabled by default).
+- `hardening_enable_ipv6` – keep IPv6 enabled by default; set to `false` only when dual-stack networking is unavailable.
+- `hardening_enable_cockpit` and `hardening_cockpit_bind_address` – opt in to Cockpit packages and bind them to a management address (default `127.0.0.1`).
 
 ## Continuous Integration
 
@@ -103,6 +108,6 @@ The registry keeps validation decoupled from the Ansible inventory while ensurin
    - `yamllint` for Proxmox config.
    - `docker compose config` for Compose.
    - `systemd-analyze verify` for Quadlet and bare-metal service units.
-   - `kubectl apply --dry-run=client --validate=true` for Kubernetes manifests.
+   - `kubectl apply --dry-run=client --validate=true` and `kubectl apply --dry-run=server --validate=true` against a dedicated Kind cluster for Kubernetes manifests.
 
 Use the same steps locally before submitting changes to keep CI green.

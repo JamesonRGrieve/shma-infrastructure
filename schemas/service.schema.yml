@@ -17,6 +17,7 @@ properties:
     type: string
   service_image:
     type: string
+    pattern: ".+@sha256:[0-9a-f]{64}$"
   service_ip:
     type: string
   service_port:
@@ -97,7 +98,17 @@ properties:
   service_packages:
     type: array
     items:
-      type: string
+      oneOf:
+        - type: string
+        - type: object
+          required: [name]
+          properties:
+            name:
+              type: string
+            version:
+              type: string
+            state:
+              type: string
   service_files:
     type: array
     items:
@@ -219,6 +230,7 @@ properties:
     properties:
       shred_after_apply:
         type: boolean
+        default: true
       env:
         type: array
         items:
