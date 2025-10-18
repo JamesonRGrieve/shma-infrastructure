@@ -10,7 +10,7 @@ Deploy services using Podman Quadlets with environment files, optional user scop
 - Host policy defaults to rejecting unsigned/unknown registries and the local Docker engine, keeping pulls scoped to approved sources.
 - `service_volumes.host_path` entries render as direct bind mounts so containers remain ephemeral while state lives on the host.
 - `service_image` entries should be digest-pinned; combine with `quadlet_auto_update: none` to ensure only vetted images run.
-- `mounts.ephemeral_mounts` entries become `Tmpfs=` declarations so containers only write to explicitly allowed paths.
+- `mounts.ephemeral_mounts` entries become `Tmpfs=` declarations hardened with `nosuid`, `nodev`, and `noexec` so containers only write to explicitly allowed paths.
 - Containers default to `User=65532:65532`, `ReadOnly=true`, `NoNewPrivileges=true`, `DropCapability=ALL`, and an empty `CapabilityBoundingSet`. Override with `service_security` only when workloads need extra permissions.
 
 ## Requirements
@@ -48,8 +48,8 @@ Environment=APP_MODE=production
 Environment=APP_FEATURE_FLAG=true
 EnvironmentFile=/etc/containers/systemd/sample-service.env
 Volume=/srv/sample-service/config:/etc/sample-service:Z
-Tmpfs=/run/sample-service:size=64Mi,mode=0755
-Tmpfs=/tmp/sample-service:size=64Mi
+Tmpfs=/run/sample-service:nosuid,nodev,noexec,size=64Mi,mode=0755
+Tmpfs=/tmp/sample-service:nosuid,nodev,noexec,size=64Mi
 PublishPort=192.0.2.50:8080:8080
 Volume=/etc/containers/systemd/secrets/tls-cert:/etc/sample-service/certs/tls.crt:ro,Z
 HealthCmd=/bin/sh -c exit 0

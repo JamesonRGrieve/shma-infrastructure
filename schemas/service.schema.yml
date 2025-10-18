@@ -323,6 +323,16 @@ properties:
         type: array
         items:
           type: string
+      apparmor_profile:
+        type: string
+      private_tmp:
+        type: boolean
+      protect_system:
+        type: string
+      protect_home:
+        oneOf:
+          - type: boolean
+          - type: string
   kubernetes:
     type: object
     properties:

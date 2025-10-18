@@ -6,6 +6,7 @@ Deploy services as LXC containers on Proxmox VE with predictable networking and 
 
 - Templates emit `container_ip`, removing brittle IP parsing in Ansible tasks.
 - LXC features derive exclusively from the service contract. Nested container flags such as `nesting=1,keyctl=1` appear only when you explicitly set `service_container.features`.
+- Feature declarations are validated against a whitelist (`nesting`, `keyctl`, `fuse`, `mount`) so typos fail fast instead of reaching Proxmox.
 - Ansible waits for SSH on `container_ip` (120 seconds) before running delegate tasks.
 - Package installation inside the container uses non-interactive APT and applies any rendered configuration or command hooks.
 - `mounts.ephemeral_mounts` entries render as systemd drop-ins (`TemporaryFileSystem=`) inside the guest so writable areas stay tmpfs backed.

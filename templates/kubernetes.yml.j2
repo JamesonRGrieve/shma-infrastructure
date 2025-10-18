@@ -114,6 +114,8 @@ spec:
       labels:
         app: {{ svc_name }}
     spec:
+      securityContext:
+        readOnlyRootFilesystem: {{ read_only_root | ternary(true, false) }}
       containers:
         - name: {{ svc_name }}
           image: {{ service_image }}

@@ -11,11 +11,15 @@
 {% set no_new_privs = security.no_new_privileges if security.no_new_privileges is defined else true %}
 {% set bounding_set = security.capability_bounding_set if security.capability_bounding_set is defined else [] %}
 {% if bounding_set is string %}{% set bounding_set = [bounding_set] %}{% endif %}
+{% set tmpfs_hardening_flags = ['nosuid', 'nodev', 'noexec'] %}
 {% set podman_tmpfs = namespace(items=[]) %}
 {% for mount in ephemeral_mounts %}
   {% set apply_targets = mount.apply_to | default(default_apply_targets) %}
   {% if 'podman' in apply_targets %}
     {% set options = [] %}
+    {% for flag in tmpfs_hardening_flags %}
+      {% if flag not in options %}{% set _ = options.append(flag) %}{% endif %}
+    {% endfor %}
     {% if mount.size is defined %}{% set _ = options.append('size=' ~ mount.size) %}{% endif %}
     {% if mount.mode is defined %}{% set _ = options.append('mode=' ~ mount.mode) %}{% endif %}
     {% set entry = mount.path %}
