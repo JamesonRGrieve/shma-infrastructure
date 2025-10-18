@@ -5,7 +5,7 @@ Deploy services as LXC containers on Proxmox VE with predictable networking and 
 ## Key changes
 
 - Templates emit `container_ip`, removing brittle IP parsing in Ansible tasks.
-- LXC containers declare `features: nesting=1,keyctl=1` so Docker/Podman workloads function inside the guest when required.
+- LXC features derive from the service contract. Nested container flags (`nesting=1,keyctl=1`) are only emitted when packages request Docker/Podman-style tooling.
 - Ansible waits for SSH on `container_ip` (120 seconds) before running delegate tasks.
 - Package installation inside the container uses non-interactive APT and applies any rendered configuration or command hooks.
 
@@ -16,6 +16,11 @@ Deploy services as LXC containers on Proxmox VE with predictable networking and 
 - Proxmox VE 7.0 or newer with API access.
 - Ubuntu 24.04 container template (defaults to `local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst`).
 - Network bridge with reachable gateway.
+- API token (`api_token_id`/`api_token_secret`) scoped to LXC operations on the target node or pool.
+
+### API tokens
+
+Configure `proxmox_api_host`, `proxmox_api_token_id`, `proxmox_api_token_secret`, and `proxmox_node` in your inventory or playbook vars. Grant the token only the permissions necessary to manage LXC guests on the desired node or resource pool.
 
 ### Ansible collections
 
@@ -44,6 +49,7 @@ container:
     net0: "name=eth0,bridge=vmbr0,ip=192.0.2.50/24,gw=192.0.2.1"
   onboot: yes
   unprivileged: yes
+  # features emitted only when packages demand nested container support
   features: "nesting=1,keyctl=1"
 
 setup:
@@ -76,6 +82,7 @@ setup:
 - Explicit IP assignments keep host firewalls predictable.
 - Use Proxmox firewall rules or host-level filtering for exposed ports.
 - Keep `features` minimal; remove `nesting` when containerized workloads are not required.
+- Prefer API tokens with only the `vms:read`/`vms:write` and `nodes:read` permissions the playbook needs. Bind them to the specific node or pool that hosts the managed LXCs instead of granting full-cluster rights.
 
 ## Troubleshooting
 

@@ -173,7 +173,11 @@ properties:
       unprivileged:
         type: string
       features:
-        type: string
+        oneOf:
+          - type: string
+          - type: array
+            items:
+              type: string
   service_volume:
     type: object
   version:
@@ -219,6 +223,7 @@ properties:
     properties:
       shred_after_apply:
         type: boolean
+        default: true
       env:
         type: array
         items:

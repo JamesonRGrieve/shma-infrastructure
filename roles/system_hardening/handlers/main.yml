@@ -7,3 +7,13 @@
 - name: Validate sudoers configuration
   ansible.builtin.command: visudo -cf /etc/sudoers
   changed_when: false
+
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart cockpit socket
+  ansible.builtin.systemd:
+    name: cockpit.socket
+    state: restarted
+    enabled: true

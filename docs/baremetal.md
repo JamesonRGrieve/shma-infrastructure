@@ -29,7 +29,7 @@ ansible-galaxy collection install community.general
 
 - `service_unit` – override description, dependencies, or the `[Service]` stanza for advanced workloads.
 - `service_packages` – list of packages to install before enabling the unit.
-- `secrets.shred_after_apply` – available to keep secret files ephemeral when combined with runtime adapters that create them locally.
+- `secrets.shred_after_apply` – defaults to `true` so rendered secrets vanish after adapters finish; set it to `false` when you must keep the artifacts.
 
 ## Validation
 

@@ -10,6 +10,19 @@
       - lxc_config.container_ip | length > 0
     fail_msg: "Rendered Proxmox configuration must define container_ip"
 
+- name: Validate Proxmox API token configuration
+  assert:
+    that:
+      - proxmox_api_token_id is defined
+      - proxmox_api_token_id | length > 0
+      - proxmox_api_token_secret is defined
+      - proxmox_api_token_secret | length > 0
+      - proxmox_api_host is defined
+      - proxmox_api_host | length > 0
+      - proxmox_node is defined
+      - proxmox_node | length > 0
+    fail_msg: "Proxmox API token credentials (id/secret) and target node must be defined"
+
 - name: Set container IP facts
   set_fact:
     container_ip: "{{ lxc_config.container_ip }}"
@@ -20,8 +33,8 @@
     vmid: "{{ lxc_config.container.vmid }}"
     hostname: "{{ lxc_config.container.hostname }}"
     node: "{{ proxmox_node }}"
-    api_user: "{{ proxmox_api_user }}"
-    api_password: "{{ proxmox_api_password }}"
+    api_token_id: "{{ proxmox_api_token_id }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
     api_host: "{{ proxmox_api_host }}"
     ostemplate: "{{ lxc_config.container.ostemplate }}"
     disk: "{{ lxc_config.container.disk }}"
@@ -31,15 +44,15 @@
     netif: "{{ lxc_config.container.netif }}"
     onboot: "{{ lxc_config.container.onboot }}"
     unprivileged: "{{ lxc_config.container.unprivileged }}"
-    features: "{{ lxc_config.container.features | default('nesting=1,keyctl=1') }}"
+    features: "{{ lxc_config.container.features | default(omit, true) }}"
     state: present
 
 - name: Start container
   community.general.proxmox:
     vmid: "{{ lxc_config.container.vmid }}"
     node: "{{ proxmox_node }}"
-    api_user: "{{ proxmox_api_user }}"
-    api_password: "{{ proxmox_api_password }}"
+    api_token_id: "{{ proxmox_api_token_id }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
     api_host: "{{ proxmox_api_host }}"
     state: started
 

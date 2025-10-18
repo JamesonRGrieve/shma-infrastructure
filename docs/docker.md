@@ -72,7 +72,7 @@ networks:
 
 - `secrets.env` entries feed the env file.
 - `secrets.files` entries create files in `secrets/<name>` and populate the Compose `secrets` map.
-- `secrets.shred_after_apply` removes rendered secrets after deployment when set to `true`.
+- `secrets.shred_after_apply` defaults to `true`, removing rendered secrets after deployment unless you explicitly opt out.
 - `service_ports` control host bindings; publish only the ports you intend to expose.
 
 ## Validating the render
@@ -89,7 +89,7 @@ docker compose -f /tmp/ansible-runtime/sample-service/docker.yml config
 
 1. Builds the env file and optional `secrets/` directory under the render output.
 2. Invokes `community.docker.docker_compose_v2` with `pull: always` to keep images fresh.
-3. Optionally shreds rendered secrets when `secrets.shred_after_apply` is enabled.
+3. Shreds rendered secrets by default; set `secrets.shred_after_apply: false` for workloads that must retain them on disk.
 4. Sets `service_ip` for the unified health gate.
 
 Use the shared health command to run a post-deploy verification:
