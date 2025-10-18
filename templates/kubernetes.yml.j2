@@ -115,6 +115,10 @@ spec:
     metadata:
       labels:
         app: {{ svc_name }}
+{% if secrets is defined and secrets.rotation_timestamp is defined and secrets.rotation_timestamp is not none %}
+      annotations:
+        shma.dev/secrets-rotation: "{{ secrets.rotation_timestamp }}"
+{% endif %}
     spec:
       securityContext:
         readOnlyRootFilesystem: {{ read_only_root | ternary(true, false) }}
@@ -152,6 +156,9 @@ spec:
             - name: {{ item.name }}
               value: {{ item.value }}
 {% endfor %}
+{% if secrets is defined and secrets.rotation_timestamp is defined and secrets.rotation_timestamp is not none %}
+            - name: SHMA_SECRETS_ROTATION
+              value: {{ secrets.rotation_timestamp | to_json }}
 
 {% if connections_per_second %}
             - name: CONNECTIONS_PER_SECOND

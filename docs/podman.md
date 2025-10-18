@@ -5,13 +5,15 @@ Deploy services using Podman Quadlets with environment files, optional user scop
 ## Enhancements
 
 - `quadlet_scope` selects system-wide (`/etc/containers/systemd`) or per-user (`~/.config/containers/systemd`) installation.
-- Secrets from the contract populate an environment file and optional `secrets/` directory, mounted read-only into the container.
+- Secrets from the contract populate a dedicated environment file (for `secrets.env`) and optional `secrets/` directory, mounted read-only into the container.
 - Health checks map directly to `HealthCmd/HealthInterval/HealthTimeout/HealthRetries` derived from `health.cmd`.
 - Host policy defaults to rejecting unsigned/unknown registries and the local Docker engine, keeping pulls scoped to approved sources.
 - `service_volumes.host_path` entries render as direct bind mounts so containers remain ephemeral while state lives on the host.
 - `service_image` entries should be digest-pinned; combine with `quadlet_auto_update: none` to ensure only vetted images run.
 - `mounts.ephemeral_mounts` entries become `Tmpfs=` declarations hardened with `nosuid`, `nodev`, and `noexec` so containers only write to explicitly allowed paths.
 - Containers default to `User=65532:65532`, `ReadOnly=true`, `NoNewPrivileges=true`, `DropCapability=ALL`, and an empty `CapabilityBoundingSet`. Override with `service_security` only when workloads need extra permissions.
+- `secrets.rotation_timestamp` (optional) is written as an inline environment variable so Quadlet restarts the container whenever you bump the value.
+
 - `service_resources.connections_per_second` surfaces as a `CONNECTIONS_PER_SECOND` variable so an nginx/envoy sidecar can
   enforce per-pod rate limits in front of the workload.
 
@@ -48,6 +50,7 @@ NoNewPrivileges=true
 DropCapability=ALL
 Environment=APP_MODE=production
 Environment=APP_FEATURE_FLAG=true
+Environment=SHMA_SECRETS_ROTATION=2024-01-01T00:00:00Z
 EnvironmentFile=/etc/containers/systemd/sample-service.env
 Volume=/srv/sample-service/config:/etc/sample-service:Z
 Tmpfs=/run/sample-service:nosuid,nodev,noexec,size=64Mi,mode=0755
@@ -76,11 +79,12 @@ For `quadlet_scope: user`, the environment file and secrets live under `~/.confi
 `roles/common/apply_runtime/tasks/podman.yml`:
 
 1. Computes the target directories based on `quadlet_scope`.
-2. Writes the env file and optional secret files (with `0400` default permissions).
+2. Writes the env file for `secrets.env` entries and optional secret files (with `0400` default permissions).
 3. Copies the `.container` unit.
 4. Executes `systemd` tasks with the correct scope and reloads daemons.
 5. Shreds rendered secrets by default; set `secrets.shred_after_apply: false` only when you need to retain them for debugging.
 6. Sets `service_ip` for the post-deploy health gate.
+7. Bounces the unit automatically whenever `secrets.rotation_timestamp` changes.
 
 Control automatic image refreshes with `quadlet_auto_update`. The default `none` avoids surprise upgrades; set it to `registry` only when you have a signing/rollout process that validates digests in CI first.
 

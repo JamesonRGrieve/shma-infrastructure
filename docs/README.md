@@ -146,6 +146,7 @@ The registry keeps validation decoupled from the Ansible inventory while ensurin
 - `mounts.persistent_volumes` – declare directories that persist across restarts and inform backup tooling.
 - `mounts.ephemeral_mounts` – enumerate tmpfs-backed paths for each runtime so only the declared directories remain writable.
 - `secrets.shred_after_apply` – defaults to `true` so rendered secret files and env files are shredded once adapters finish. Override with `false` only when persistent copies are required.
+- `secrets.rotation_timestamp` – optional marker that, when changed, forces every runtime to recreate containers/pods and refresh secret material without a full service refactor.
 - `service_security` – tune the default non-root, read-only container posture when a workload needs additional capabilities.
 - `hardening_enable_cockpit` – opt-in toggle that installs Cockpit, binds it to `hardening_cockpit_listen_address` (defaults to `127.0.0.1`), and optionally opens UFW 9090 to the addresses listed in `hardening_cockpit_allowed_sources`.
 - `hardening_cockpit_passwordless_sudo` – defaults to `false`. Enable only if Cockpit must issue privileged commands without prompting.

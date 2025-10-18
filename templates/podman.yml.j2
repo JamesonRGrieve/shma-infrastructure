@@ -40,6 +40,7 @@
 {% set ports = service_ports | default([]) %}
 {% set volumes = service_volumes | default([]) %}
 {% set inline_env = service_env | default([]) %}
+{% set inline_env_names = inline_env | map(attribute='name') | list %}
 {% set resources = service_resources | default({}) %}
 {% if resources.connections_per_second is defined %}
   {% set inline_env = inline_env + [{'name': 'CONNECTIONS_PER_SECOND', 'value': resources.connections_per_second | string}] %}
@@ -63,6 +64,9 @@ DropCapability={{ cap }}
 {% for env in inline_env %}
 Environment={{ env.name }}={{ env.value }}
 {% endfor %}
+{% if secrets is defined and secrets.rotation_timestamp is defined and secrets.rotation_timestamp is not none and 'SHMA_SECRETS_ROTATION' not in inline_env_names %}
+Environment=SHMA_SECRETS_ROTATION={{ secrets.rotation_timestamp }}
+{% endif %}
 {% if secret_env %}
 EnvironmentFile={{ env_file_path }}
 {% endif %}

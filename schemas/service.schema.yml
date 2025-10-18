@@ -282,6 +282,8 @@ properties:
       shred_after_apply:
         type: boolean
         default: true
+      rotation_timestamp:
+        type: string
       env:
         type: array
         items:
