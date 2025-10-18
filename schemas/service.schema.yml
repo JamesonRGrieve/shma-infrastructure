@@ -190,8 +190,6 @@ properties:
   needs_container_runtime:
     type: boolean
 
-  service_volume:
-    type: object
   version:
     type: string
   requires:
