@@ -30,16 +30,51 @@
     {% set _ = pkg_names.items.append(pkg_name | lower) %}
   {% endif %}
 {% endfor %}
+{% set allowed_lxc_features = ['nesting', 'keyctl', 'fuse', 'mount'] %}
 {% set feature_ns = namespace(value=None) %}
 {% if container.features is defined %}
-  {% if container.features %}
-    {% if container.features is string %}
-      {% set feature_ns.value = container.features %}
-    {% elif container.features is sequence %}
-      {% set feature_ns.value = container.features | join(',') %}
-    {% else %}
-      {% set feature_ns.value = container.features | string %}
+  {% set raw_features = [] %}
+  {% if container.features is string %}
+    {% set raw_features = (container.features | string) | split(',') %}
+  {% elif container.features is sequence %}
+    {% set raw_features = container.features %}
+  {% elif container.features %}
+    {% set raw_features = [container.features] %}
+  {% endif %}
+  {% set validated = namespace(items=[]) %}
+  {% set invalid = namespace(items=[]) %}
+  {% for feature in raw_features %}
+    {% set feature_str = feature | string %}
+    {% set trimmed = feature_str | trim %}
+    {% if trimmed %}
+      {% set parts = trimmed | split('=') %}
+      {% set name = parts[0] | trim %}
+      {% if name in allowed_lxc_features %}
+        {% set value_parts = parts[1:] %}
+        {% set value = value_parts | join('=') %}
+        {% if value | length > 0 %}
+          {% set normalized = name ~ '=' ~ value | trim %}
+        {% else %}
+          {% set normalized = name ~ '=1' %}
+        {% endif %}
+        {% if normalized not in validated.items %}
+          {% set _ = validated.items.append(normalized) %}
+        {% endif %}
+      {% else %}
+        {% if name %}
+          {% set _ = invalid.items.append(name) %}
+        {% else %}
+          {% set _ = invalid.items.append(trimmed) %}
+        {% endif %}
+      {% endif %}
     {% endif %}
+  {% endfor %}
+  {% if invalid.items %}
+    {% set invalid_message = 'Unknown Proxmox LXC feature(s): ' ~ (invalid.items | unique | join(', ')) %}
+    {{ lookup('pipe', 'python3 -c "import sys; sys.stderr.write(\"' ~ (invalid_message | replace('"', '\\"')) ~ '\n\"); sys.exit(1)"') }}
+  {% endif %}
+  {% if validated.items %}
+    {% set feature_ns.value = validated.items | join(',') %}
   {% else %}
     {% set feature_ns.value = '' %}
   {% endif %}
@@ -52,6 +87,11 @@
 {% for command in cmd_list %}
   {% set _ = commands_ns.items.append(command) %}
 {% endfor %}
+{% set has_packages = pkg_list | length > 0 %}
+{% set has_config = config_ns.items | length > 0 %}
+{% set has_services = svc_list | length > 0 %}
+{% set has_commands = commands_ns.items | length > 0 %}
+{% set has_setup = has_packages or has_config or has_services or has_commands %}
 {% if proxmox_tmpfs.items and (service_unit_name is defined or service_id is defined) %}
   {% set unit_name = service_unit_name | default(service_id) %}
   {% if unit_name %}
@@ -87,25 +127,36 @@ container:
   features: "keyctl=0"
 {% endif %}
 
+{% if has_setup %}
 setup:
-  packages:{% if pkg_list | length == 0 %} []{% else %}
+{% if has_packages %}
+  packages:
 {% for pkg in pkg_list %}
     - {{ pkg }}
-{% endfor %}{% endif %}
-  config:{% if config_ns.items | length == 0 %} []{% else %}
+{% endfor %}
+{% endif %}
+{% if has_config %}
+  config:
 {% for item in config_ns.items %}
     - path: {{ item.path }}
       content: |
 {{ item.content | indent(8, true) }}{% if item.mode is defined %}
-      mode: {{ item.mode }}{% endif %}
-{% endfor %}{% endif %}
-  services:{% if svc_list | length == 0 %} []{% else %}
+      mode: {{ item.mode }}{% endif %}{% if item.dir_mode is defined %}
+      dir_mode: {{ item.dir_mode }}{% endif %}
+{% endfor %}
+{% endif %}
+{% if has_services %}
+  services:
 {% for svc in svc_list %}
     - name: {{ svc.name }}
       enabled: {{ svc.enabled | default(true) | ternary(true, false) }}
       state: {{ svc.state | default('started') }}
-{% endfor %}{% endif %}
-  commands:{% if commands_ns.items | length == 0 %} []{% else %}
+{% endfor %}
+{% endif %}
+{% if has_commands %}
+  commands:
 {% for cmd in commands_ns.items %}
     - {{ cmd }}
-{% endfor %}{% endif %}
+{% endfor %}
+{% endif %}
+{% endif %}

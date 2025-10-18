@@ -95,6 +95,9 @@ jobs:
           chmod +x /tmp/kubectl
           sudo mv /tmp/kubectl /usr/local/bin/kubectl
 
+      - name: Verify compatibility matrix
+        run: python ci/verify_versions.py
+
       - name: Run gitleaks
         run: gitleaks detect --no-banner --redact --source .
 
@@ -119,9 +122,13 @@ service_file = Path(os.environ['SERVICE_FILE'])
 with service_file.open('r', encoding='utf-8') as handle:
     document = yaml.safe_load(handle)
 service_id = document['service_id']
+service_name = document.get('service_name', service_id)
+namespace = document.get('service_namespace', 'default')
 output_dir = Path('/tmp/ansible-runtime') / service_id
 with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
     fh.write(f"service_id={service_id}\n")
+    fh.write(f"service_name={service_name}\n")
+    fh.write(f"namespace={namespace}\n")
     fh.write(f"runtime_dir={output_dir}\n")
 PY
 
@@ -181,27 +188,184 @@ PY
             ${{ steps.metadata.outputs.runtime_dir }}/podman.yml \
             ${{ steps.metadata.outputs.runtime_dir }}/kubernetes.yml
 
-      - name: Run Conftest policies
+      - name: Run Conftest policies (service definitions)
         run: conftest test ${{ matrix.service_file }} policy
+
+      - name: Verify secret shredding behavior
+        run: ansible-playbook tests/verify_secret_shredding.yml
+
+      - name: Run Conftest policies (rendered Kubernetes manifests)
+        run: conftest test ${{ steps.metadata.outputs.runtime_dir }}/kubernetes.yml policy
 
       - name: Scan referenced container images
         run: |
-          python - <<'PY'
-import json
-import sys
-from pathlib import Path
-import yaml
-
-service_file = Path("${{ matrix.service_file }}")
-document = yaml.safe_load(service_file.read_text())
-image = document.get("service_image")
-if not image:
-    sys.exit(0)
-print(image)
-PY
+          python ci/collect_container_images.py \
+            "${{ matrix.service_file }}" \
+            "${{ steps.metadata.outputs.runtime_dir }}" \
           | while read -r image; do
               trivy image --exit-code 1 --severity CRITICAL --quiet "$image" || exit 1
             done
 
       - name: Cosign policy check
         run: cosign version
+
+  kubernetes-integration:
+    name: "KinD integration (${{ matrix.service_file }})"
+    runs-on: ubuntu-latest
+    needs: lint-and-validate
+    strategy:
+      fail-fast: false
+      matrix:
+        service_file:
+          - tests/sample_service.yml
+          - tests/samples/minimal.yml
+    env:
+      SERVICE_FILE: ${{ matrix.service_file }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f463d58a31b38cfa6d26b4f752063b9
+
+      - name: Set up Python
+        uses: actions/setup-python@13f3840a65875556b0f1a6d6e5d79d993d3f5a6b
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip
+        uses: actions/cache@13dac90522f915087a5de3c972d4d68512c964b0
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --requirement requirements.txt
+
+      - name: Install Ansible collections
+        run: ansible-galaxy collection install -r ci/collections-stable.yml
+
+      - name: Install kubectl
+        run: |
+          version="v1.29.3"
+          curl -fsSL https://dl.k8s.io/release/${version}/bin/linux/amd64/kubectl -o /tmp/kubectl
+          curl -fsSL https://dl.k8s.io/${version}/bin/linux/amd64/kubectl.sha256 -o /tmp/kubectl.sha256
+          echo "$(cat /tmp/kubectl.sha256)  /tmp/kubectl" | sha256sum -c -
+          chmod +x /tmp/kubectl
+          sudo mv /tmp/kubectl /usr/local/bin/kubectl
+
+      - name: Install KinD
+        run: |
+          kind_version="v0.22.0"
+          curl -fsSL https://github.com/kubernetes-sigs/kind/releases/download/${kind_version}/kind-linux-amd64 -o /tmp/kind
+          echo "fa28e8a3d51d38958cd97df1d3b1120686afa6462d39d7496b3fd1d195e27eb0  /tmp/kind" | sha256sum -c -
+          chmod +x /tmp/kind
+          sudo mv /tmp/kind /usr/local/bin/kind
+
+      - name: Determine service metadata
+        id: integration_metadata
+        run: |
+          python - <<'PY'
+import os
+from pathlib import Path
+import yaml
+
+service_file = Path(os.environ['SERVICE_FILE'])
+with service_file.open('r', encoding='utf-8') as handle:
+    document = yaml.safe_load(handle)
+service_id = document['service_id']
+service_name = document.get('service_name', service_id)
+namespace = document.get('service_namespace', 'default')
+output_dir = Path('/tmp/ansible-runtime') / service_id
+with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
+    fh.write(f"service_id={service_id}\n")
+    fh.write(f"service_name={service_name}\n")
+    fh.write(f"namespace={namespace}\n")
+    fh.write(f"runtime_dir={output_dir}\n")
+PY
+
+      - name: Render Kubernetes manifest
+        run: ansible-playbook tests/render.yml -e runtime=kubernetes -e service_definition_file=${{ matrix.service_file }}
+
+      - name: Create KinD cluster
+        run: kind create cluster --name integration-${{ steps.integration_metadata.outputs.service_id }} --wait 120s
+
+      - name: Apply manifests to KinD
+        env:
+          NAMESPACE: ${{ steps.integration_metadata.outputs.namespace }}
+        run: |
+          kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -f "${{ steps.integration_metadata.outputs.runtime_dir }}/kubernetes.yml"
+
+      - name: Wait for deployment readiness
+        env:
+          NAMESPACE: ${{ steps.integration_metadata.outputs.namespace }}
+          SERVICE_NAME: ${{ steps.integration_metadata.outputs.service_name }}
+        run: |
+          kubectl rollout status deployment/$SERVICE_NAME -n $NAMESPACE --timeout=180s
+          kubectl wait --namespace $NAMESPACE --for=condition=Ready pod -l app=$SERVICE_NAME --timeout=180s
+
+      - name: Verify health checks
+        env:
+          NAMESPACE: ${{ steps.integration_metadata.outputs.namespace }}
+          SERVICE_NAME: ${{ steps.integration_metadata.outputs.service_name }}
+        run: |
+          python ci/run_kubernetes_health_checks.py "${{ matrix.service_file }}" "$NAMESPACE" "$SERVICE_NAME"
+
+      - name: Collect diagnostics on failure
+        if: failure()
+        env:
+          NAMESPACE: ${{ steps.integration_metadata.outputs.namespace }}
+          SERVICE_NAME: ${{ steps.integration_metadata.outputs.service_name }}
+        run: |
+          kubectl get all -n $NAMESPACE -o wide || true
+          kubectl describe deployment/$SERVICE_NAME -n $NAMESPACE || true
+          kubectl describe pods -n $NAMESPACE || true
+
+      - name: Tear down KinD cluster
+        if: always()
+        run: kind delete cluster --name integration-${{ steps.integration_metadata.outputs.service_id }} || true
+
+  render-benchmark:
+    name: "Render benchmarks (${{ matrix.service_file }})"
+    runs-on: ubuntu-latest
+    needs: lint-and-validate
+    strategy:
+      fail-fast: false
+      matrix:
+        service_file:
+          - tests/sample_service.yml
+          - tests/samples/full.yml
+          - tests/samples/minimal.yml
+          - tests/samples/with_secrets.yml
+          - tests/samples/with_pvc.yml
+    env:
+      SERVICE_FILE: ${{ matrix.service_file }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f463d58a31b38cfa6d26b4f752063b9
+
+      - name: Set up Python
+        uses: actions/setup-python@13f3840a65875556b0f1a6d6e5d79d993d3f5a6b
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip
+        uses: actions/cache@13dac90522f915087a5de3c972d4d68512c964b0
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --requirement requirements.txt
+
+      - name: Install Ansible collections
+        run: ansible-galaxy collection install -r ci/collections-stable.yml
+
+      - name: Benchmark runtime rendering
+        run: python ci/benchmark_render.py "${{ matrix.service_file }}"

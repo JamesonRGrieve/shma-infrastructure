@@ -36,6 +36,7 @@ service_commands:
 service_resources:
   memory_mb: 512
   cpu_cores: 1
+  connections_per_second: 200
 service_namespace: sample
 service_replicas: 1
 service_storage_gb: 5

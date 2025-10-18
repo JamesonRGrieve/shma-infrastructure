@@ -99,6 +99,12 @@ def build_parser() -> ArgumentParser:
         type=Path,
         help="Directory containing sample service definitions to validate",
     )
+    parser.add_argument(
+        "--dependency-registry",
+        type=Path,
+        action="append",
+        help="Path to dependency registry file(s) to validate against the registry schema",
+    )
     return parser
 
 
@@ -114,6 +120,43 @@ def main() -> int:
     schema, validator = schema_validation
 
     print("Schema validation succeeded.")
+
+    if args.dependency_registry:
+        registry_schema_validation = validate_schema(
+            Path("schemas/dependency-registry.schema.yml")
+        )
+        if isinstance(
+            registry_schema_validation, int
+        ):  # pragma: no cover - failure already logged
+            return registry_schema_validation
+
+        _, registry_validator = registry_schema_validation
+        registry_failures: list[str] = []
+        for registry_path in args.dependency_registry:
+            if not registry_path.exists():
+                registry_failures.append(
+                    f"Dependency registry file not found: {registry_path}"
+                )
+                continue
+            try:
+                registry_document = load_yaml(registry_path)
+            except ValueError as exc:
+                registry_failures.append(str(exc))
+                continue
+            try:
+                registry_validator.validate(registry_document)
+            except ValidationError as exc:
+                registry_failures.append(f"{registry_path}: {exc.message}")
+
+        if registry_failures:
+            for failure in registry_failures:
+                print(failure, file=sys.stderr)
+            return 1
+
+        print(
+            "Validated dependency registry files: "
+            + ", ".join(str(path) for path in args.dependency_registry)
+        )
 
     if args.examples:
         examples_dir = args.examples

@@ -3,6 +3,7 @@
 {% set after = unit.after | default(['network.target']) %}
 {% set service_section = unit.service | default({'Type': 'simple', 'ExecStart': '/usr/bin/true'}) %}
 {% set install_targets = unit.install_wanted_by | default(['multi-user.target']) %}
+{% set security = service_security | default({}) %}
 {% set mounts_config = mounts | default({}) %}
 {% set ephemeral_mounts = mounts_config.ephemeral_mounts | default([]) %}
 {% set default_apply_targets = ['docker', 'podman', 'kubernetes', 'proxmox', 'baremetal'] %}
@@ -16,6 +17,26 @@
     {% set _ = baremetal_tmpfs.items.append({'path': mount.path, 'options': options}) %}
   {% endif %}
 {% endfor %}
+{% set read_only_root = security.read_only_root_filesystem if security.read_only_root_filesystem is defined else true %}
+{% set private_tmp_default = security.private_tmp if security.private_tmp is defined else true %}
+{% set protect_system_default = security.protect_system if security.protect_system is defined else (read_only_root | ternary('strict', 'full')) %}
+{% set protect_home_default = security.protect_home if security.protect_home is defined else 'yes' %}
+{% if protect_home_default is boolean %}
+  {% set protect_home_value = protect_home_default | ternary('yes', 'no') %}
+{% else %}
+  {% set protect_home_value = protect_home_default %}
+{% endif %}
+{% if private_tmp_default is boolean %}
+  {% set private_tmp_value = private_tmp_default | ternary('yes', 'no') %}
+{% else %}
+  {% set private_tmp_value = private_tmp_default %}
+{% endif %}
+{% if protect_system_default is boolean %}
+  {% set protect_system_value = protect_system_default | ternary('strict', 'no') %}
+{% else %}
+  {% set protect_system_value = protect_system_default %}
+{% endif %}
+
 [Unit]
 Description={{ description }}
 {% for dependency in after %}
@@ -26,6 +47,15 @@ After={{ dependency }}
 {% for key, value in service_section.items() %}
 {{ key }}={{ value }}
 {% endfor %}
+{% if 'PrivateTmp' not in service_section %}
+PrivateTmp={{ private_tmp_value }}
+{% endif %}
+{% if 'ProtectSystem' not in service_section %}
+ProtectSystem={{ protect_system_value }}
+{% endif %}
+{% if 'ProtectHome' not in service_section %}
+ProtectHome={{ protect_home_value }}
+{% endif %}
 {% if baremetal_tmpfs.items %}
 {% for mount in baremetal_tmpfs.items %}
 TemporaryFileSystem={{ mount.path }}{% if mount.options %}:{{ mount.options | join(',') }}{% endif %}

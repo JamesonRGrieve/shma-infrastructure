@@ -31,6 +31,7 @@
 {% endfor %}
 {% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] %}
 {% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
+{% set inline_env = service_env | default([]) %}
 {% set env_secret_name = svc_name + '-env' %}
 {% set file_secret_name = svc_name + '-files' %}
 {% set health_cmd = health.cmd | default(['true']) %}
@@ -38,12 +39,13 @@
 {% set health_timeout_seconds = (health.timeout | default('5s')) | regex_replace('s$', '') | int %}
 {% set health_retries = health.retries | default(3) %}
 {% set replicas = service_replicas | default(1) %}
-{% set ports = service_ports | default((service_port is defined) | ternary([service_port], [])) %}
+{% set ports = service_ports | default([]) %}
 {% set container_port = ports[0].target if ports | length > 0 else 8080 %}
-{% set service_port = ports[0].published if ports | length > 0 and ports[0].published is defined else container_port %}
+{% set service_port_value = ports[0].published if ports | length > 0 and ports[0].published is defined else container_port %}
 {% set resources = service_resources | default({'memory_mb': 256, 'cpu_cores': 1}) %}
 {% set memory_request = resources.memory_mb | default(256) %}
 {% set cpu_cores = resources.cpu_cores | default(1) %}
+{% set connections_per_second = resources.connections_per_second if resources.connections_per_second is defined else None %}
 {% set volume_config = service_volume | default(service_volumes[0] if service_volumes is defined and service_volumes | length > 0 else None) %}
 {% set use_host_path = volume_config is mapping and volume_config.host_path is defined %}
 {% set host_path = volume_config.host_path if use_host_path else None %}
@@ -118,6 +120,8 @@ spec:
         shma.dev/secrets-rotation: "{{ secrets.rotation_timestamp }}"
 {% endif %}
     spec:
+      securityContext:
+        readOnlyRootFilesystem: {{ read_only_root | ternary(true, false) }}
       containers:
         - name: {{ svc_name }}
           image: {{ service_image }}
@@ -134,7 +138,11 @@ spec:
                 - {{ cap }}
 {% endfor %}
 {% endif %}
+{% set has_secret_env = secret_env | length > 0 %}
+{% set has_inline_env = inline_env | length > 0 %}
+{% if has_secret_env or has_inline_env %}
           env:
+{% if has_secret_env %}
 {% for item in secret_env %}
             - name: {{ item.name }}
               valueFrom:
@@ -142,13 +150,22 @@ spec:
                   name: {{ env_secret_name }}
                   key: {{ item.name }}
 {% endfor %}
-{% for item in service_env | default([]) %}
+{% endif %}
+{% if has_inline_env %}
+{% for item in inline_env %}
             - name: {{ item.name }}
               value: {{ item.value }}
 {% endfor %}
 {% if secrets is defined and secrets.rotation_timestamp is defined and secrets.rotation_timestamp is not none %}
             - name: SHMA_SECRETS_ROTATION
               value: {{ secrets.rotation_timestamp | to_json }}
+
+{% if connections_per_second %}
+            - name: CONNECTIONS_PER_SECOND
+              value: "{{ connections_per_second }}"
+
+{% endif %}
+
 {% endif %}
           ports:
             - containerPort: {{ container_port }}
@@ -234,7 +251,7 @@ spec:
   selector:
     app: {{ svc_name }}
   ports:
-    - port: {{ service_port }}
+    - port: {{ service_port_value }}
       targetPort: {{ container_port }}
   type: ClusterIP
 {% if ingress_enabled and ingress_routes %}
@@ -260,13 +277,13 @@ spec:
     - host: {{ route.host }}
       http:
         paths:
-          - path: {{ route.path_prefix | default('/') }}
+          - path: {{ route.path_prefix }}
             pathType: Prefix
             backend:
               service:
                 name: {{ svc_name }}
                 port:
-                  number: {{ service_port }}
+                  number: {{ service_port_value }}
 {% endfor %}
 {% if tls_map %}
   tls:

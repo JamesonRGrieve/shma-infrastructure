@@ -10,7 +10,7 @@ Deploy services using Docker Compose with secret-aware environment injection and
 - Health probes come directly from `health.cmd` ensuring parity with other runtimes.
 - Host bind mounts are first-class: specify `service_volumes.host_path` to keep container filesystems disposable while state persists on the host.
 - Ephemeral tmpfs mounts defined under `mounts.ephemeral_mounts` render via Compose `tmpfs` entries so only declared paths remain writable.
-- Containers default to running as UID/GID `65532`, drop all capabilities, run as read-only, and set `no-new-privileges`. Override with `service_security` when a workload needs explicit grants.
+- Containers default to running as UID/GID `65532`, drop all capabilities, run as read-only, enforce `no-new-privileges`, and attach the Docker `apparmor=docker-default` profile. Override with `service_security` when a workload needs explicit grants or to supply a different AppArmor profile.
 
 ## Prerequisites
 
@@ -41,6 +41,10 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+      - apparmor=docker-default
+    env_file:
+      - ./sample-service.env
+
     environment:
       APP_MODE: production
       APP_FEATURE_FLAG: "true"
@@ -84,6 +88,8 @@ networks:
 - `mounts.persistent_volumes` names directories that require backups, while `mounts.ephemeral_mounts` defines tmpfs-backed paths for runtimes that support them.
 - `service_security` customises the default non-root, read-only security posture when a workload needs explicit relaxations.
 - `service_image` values should be pinned by digest; promote a new digest only after it passes your CI scanning gates.
+- `service_resources.connections_per_second` propagates to a `CONNECTIONS_PER_SECOND` environment variable so nginx/envoy
+  sidecars can enforce per-pod limits in front of the workload.
 
 ## Validating the render
 
