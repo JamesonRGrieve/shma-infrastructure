@@ -1,29 +1,18 @@
 ---
 - name: Resolve Docker secrets
   set_fact:
-    compose_secret_env: {{ (secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else []) }}
-    compose_secret_files: {{ secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] }}
-
-- name: Apply default secret environment values when unspecified
-  set_fact:
-    compose_secret_env: {{ compose_secret_env + [
-      {'name': 'MYSQL_ROOT_PASSWORD', 'value': mariadb_root_password},
-      {'name': 'MYSQL_PASSWORD', 'value': mariadb_user_password}
-    ] if compose_secret_env | length == 0 else compose_secret_env }}
-
-- name: Deduplicate secret environment variables
-  set_fact:
-    compose_secret_env: >-
-      {{ compose_secret_env | reverse | unique(attribute='name') | reverse }}
+    compose_secret_env: "{{ secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] }}"
+    compose_secret_files: "{{ secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] }}"
 
 - name: Write Compose secret environment file
   copy:
-    dest: "{{ runtime_output_dir }}/{{ mariadb_hostname }}.env"
+    dest: "{{ runtime_output_dir }}/{{ service_name | default(service_id) }}.env"
     mode: '0600'
     content: |-
       {% for item in compose_secret_env %}
       {{ item.name }}={{ item.value }}
       {% endfor %}
+  when: compose_secret_env | length > 0
   no_log: true
 
 - name: Ensure Compose secret directory exists
@@ -52,4 +41,4 @@
 
 - name: Set service IP for health checks
   set_fact:
-    service_ip: "{{ mariadb_ip }}"
+    service_ip: "{{ service_ip | default(ansible_default_ipv4.address) }}"

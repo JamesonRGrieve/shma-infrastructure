@@ -1,44 +1,64 @@
-{% set default_secret_env = [
-  {'name': 'MYSQL_ROOT_PASSWORD', 'value': mariadb_root_password},
-  {'name': 'MYSQL_PASSWORD', 'value': mariadb_user_password}
-] %}
-{% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else default_secret_env %}
-{% set secret_env_names = secret_env | map(attribute='name') | list %}
+{% set services_list = services | default([{
+  'name': service_name | default(service_id),
+  'container_name': service_name | default(service_id),
+  'image': service_image,
+  'env': service_env | default([]),
+  'ports': service_ports | default((service_port is defined) | ternary([service_port], [])),
+  'volumes': service_volumes | default([]),
+  'networks': service_networks | default(['app-network'])
+}]) %}
+{% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] %}
 {% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
-{% set env_file_name = mariadb_hostname + '.env' %}
+{% set env_file_name = (service_name | default(service_id)) + '.env' %}
 version: '3.8'
 
 services:
-  mariadb:
-    image: mariadb:{{ version }}
-    container_name: {{ mariadb_hostname }}
+{% for svc in services_list %}
+  {{ svc.name }}:
+    image: {{ svc.image }}
+    container_name: {{ svc.container_name | default(svc.name) }}
     restart: unless-stopped
-{% if secret_env %}
+{% set svc_env_file = svc.env_file | default(env_file_name) %}
+{% set svc_secret_env = svc.secret_env | default(secret_env) %}
+{% if svc_secret_env %}
     env_file:
-      - "./{{ env_file_name }}"
+      - "./{{ svc_env_file }}"
 {% endif %}
-{% set inline_env = {
-  'MYSQL_DATABASE': mariadb_database,
-  'MYSQL_USER': mariadb_user
-} %}
-{% set filtered_inline_env = inline_env.items() | rejectattr('0', 'in', secret_env_names) | list %}
-{% if filtered_inline_env %}
+{% set inline_env = svc.env | default([]) %}
+{% if inline_env %}
     environment:
-{% for key, value in filtered_inline_env %}
-      {{ key }}: {{ value }}
+{% for item in inline_env %}
+      {{ item.name }}: {{ item.value }}
 {% endfor %}
 {% endif %}
+{% set volumes = svc.volumes | default([]) %}
+{% if volumes %}
     volumes:
-      - mariadb-data:/var/lib/mysql
+{% for vol in volumes %}
+      - {{ vol.source | default(vol.name) }}:{{ vol.target }}{% if vol.mode is defined %}:{{ vol.mode }}{% endif %}
+{% endfor %}
+{% endif %}
+{% set ports = svc.ports | default([]) %}
+{% if ports %}
     ports:
-      - "{{ mariadb_ip }}:3306:3306"
+{% for port in ports %}
+      - "{{ port.host_ip | default('') }}{% if port.host_ip is defined and port.host_ip | string | length > 0 %}:{% endif %}{{ port.published | default(port.target) }}:{{ port.target }}{% if port.protocol is defined %}/{{ port.protocol }}{% endif %}"
+{% endfor %}
+{% endif %}
+{% set networks = svc.networks | default(['app-network']) %}
+{% if networks %}
     networks:
-      - app-network
+{% for net in networks %}
+      - {{ net }}
+{% endfor %}
+{% endif %}
+{% if health is defined %}
     healthcheck:
-      test: {{ health.cmd | default(['mysqladmin', 'ping', '-h', 'localhost']) | to_json }}
+      test: {{ health.cmd | default(['true']) | to_json }}
       interval: {{ health.interval | default('10s') }}
       timeout: {{ health.timeout | default('5s') }}
       retries: {{ health.retries | default(3) }}
+{% endif %}
 {% if file_secrets %}
     secrets:
 {% for secret in file_secrets %}
@@ -47,12 +67,26 @@ services:
         mode: {{ secret.mode | default('0400') }}
 {% endfor %}
 {% endif %}
+{% endfor %}
 
+{% set ns = namespace(volumes=[]) %}
+{% for svc in services_list %}
+  {% for vol in svc.volumes | default([]) %}
+    {% set volume_name = vol.source | default(vol.name) %}
+    {% if volume_name not in ns.volumes %}
+      {% set _ = ns.volumes.append(volume_name) %}
+    {% endif %}
+  {% endfor %}
+{% endfor %}
+{% if ns.volumes %}
 volumes:
-  mariadb-data:
+{% for volume_name in ns.volumes %}
+  {{ volume_name }}:
     driver: local
-{% if file_secrets %}
+{% endfor %}
+{% endif %}
 
+{% if file_secrets %}
 secrets:
 {% for secret in file_secrets %}
   {{ secret.name }}:
@@ -60,6 +94,18 @@ secrets:
 {% endfor %}
 {% endif %}
 
+{% set network_ns = namespace(items=[]) %}
+{% for svc in services_list %}
+  {% for net in svc.networks | default(['app-network']) %}
+    {% if net not in network_ns.items %}
+      {% set _ = network_ns.items.append(net) %}
+    {% endif %}
+  {% endfor %}
+{% endfor %}
+{% if network_ns.items %}
 networks:
-  app-network:
+{% for net in network_ns.items %}
+  {{ net }}:
     driver: bridge
+{% endfor %}
+{% endif %}

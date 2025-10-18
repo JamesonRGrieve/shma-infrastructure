@@ -1,8 +1,8 @@
 ---
-- name: Restart MariaDB
-  listen: Restart MariaDB
+- name: Restart service
+  listen: Restart service
   become: true
   systemd:
-    name: "{{ mariadb_service_name | default('mariadb') }}"
+    name: "{{ service_unit_name | default(service_id) }}"
     state: restarted
-  delegate_to: "{{ container_ip | default(inventory_hostname) }}"
+  delegate_to: "{{ container_ip | default(service_ip | default(inventory_hostname)) }}"

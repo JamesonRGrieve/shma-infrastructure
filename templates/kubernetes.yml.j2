@@ -1,16 +1,30 @@
-{% set svc_name = service_id | default('mariadb') %}
-{% set namespace = k8s_namespace | default('default') %}
-{% set default_secret_env = [
-  {'name': 'MYSQL_ROOT_PASSWORD', 'value': mariadb_root_password},
-  {'name': 'MYSQL_PASSWORD', 'value': mariadb_user_password}
-] %}
-{% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else default_secret_env %}
+{% set svc_name = service_name | default(service_id) %}
+{% set namespace = service_namespace | default('default') %}
+{% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] %}
 {% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
 {% set secret_name = svc_name + '-secrets' %}
-{% set health_cmd = health.cmd | default(['mysqladmin', 'ping', '-h', 'localhost']) %}
+{% set health_cmd = health.cmd | default(['true']) %}
 {% set health_interval_seconds = (health.interval | default('10s')) | regex_replace('s$', '') | int %}
 {% set health_timeout_seconds = (health.timeout | default('5s')) | regex_replace('s$', '') | int %}
 {% set health_retries = health.retries | default(3) %}
+{% set replicas = service_replicas | default(1) %}
+{% set ports = service_ports | default((service_port is defined) | ternary([service_port], [])) %}
+{% set container_port = ports[0].target if ports | length > 0 else 8080 %}
+{% set service_port = ports[0].published if ports | length > 0 and ports[0].published is defined else container_port %}
+{% set resources = service_resources | default({'memory_mb': 256, 'cpu_cores': 1}) %}
+{% set memory_request = resources.memory_mb | default(256) %}
+{% set cpu_cores = resources.cpu_cores | default(1) %}
+{% set volume_config = service_volume | default(service_volumes[0] if service_volumes is defined and service_volumes | length > 0 else None) %}
+{% if service_storage_size is defined %}
+{% set storage_size = service_storage_size %}
+{% elif volume_config is mapping and volume_config.size is defined %}
+{% set storage_size = volume_config.size %}
+{% elif service_storage_gb is defined %}
+{% set storage_size = service_storage_gb ~ 'Gi' %}
+{% else %}
+{% set storage_size = '1Gi' %}
+{% endif %}
+{% set volume_mount_path = volume_config.target if volume_config is mapping and volume_config.target is defined else '/data' %}
 ---
 apiVersion: v1
 kind: Secret
@@ -36,7 +50,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: {{ mariadb_storage_gb }}Gi
+      storage: {{ storage_size }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -44,7 +58,7 @@ metadata:
   name: {{ svc_name }}
   namespace: {{ namespace }}
 spec:
-  replicas: {{ mariadb_replicas | default(1) }}
+  replicas: {{ replicas }}
   selector:
     matchLabels:
       app: {{ svc_name }}
@@ -55,7 +69,7 @@ spec:
     spec:
       containers:
         - name: {{ svc_name }}
-          image: mariadb:{{ version }}
+          image: {{ service_image }}
           env:
 {% for item in secret_env %}
             - name: {{ item.name }}
@@ -64,15 +78,15 @@ spec:
                   name: {{ secret_name }}
                   key: {{ item.name }}
 {% endfor %}
-            - name: MYSQL_DATABASE
-              value: {{ mariadb_database }}
-            - name: MYSQL_USER
-              value: {{ mariadb_user }}
+{% for item in service_env | default([]) %}
+            - name: {{ item.name }}
+              value: {{ item.value }}
+{% endfor %}
           ports:
-            - containerPort: 3306
+            - containerPort: {{ container_port }}
           volumeMounts:
             - name: data
-              mountPath: /var/lib/mysql
+              mountPath: {{ volume_mount_path }}
 {% if file_secrets %}
 {% for secret in file_secrets %}
             - name: secret-files
@@ -104,11 +118,11 @@ spec:
             successThreshold: 1
           resources:
             requests:
-              memory: {{ mariadb_memory }}Mi
-              cpu: {{ mariadb_cores * 1000 }}m
+              memory: {{ memory_request }}Mi
+              cpu: {{ (cpu_cores * 1000) | int }}m
             limits:
-              memory: {{ mariadb_memory }}Mi
-              cpu: {{ mariadb_cores * 1000 }}m
+              memory: {{ memory_request }}Mi
+              cpu: {{ (cpu_cores * 1000) | int }}m
       volumes:
         - name: data
           persistentVolumeClaim:
@@ -133,6 +147,6 @@ spec:
   selector:
     app: {{ svc_name }}
   ports:
-    - port: 3306
-      targetPort: 3306
+    - port: {{ service_port }}
+      targetPort: {{ container_port }}
   type: ClusterIP

@@ -14,17 +14,6 @@
   set_fact:
     container_ip: "{{ lxc_config.container_ip }}"
     service_ip: "{{ lxc_config.container_ip }}"
-    mariadb_allowed_hosts_raw: {{ mariadb_allowed_hosts | default([lxc_config.container_ip]) }}
-
-- name: Normalize allowed host list
-  set_fact:
-    mariadb_allowed_hosts_effective: {{ mariadb_allowed_hosts_raw if (mariadb_allowed_hosts_raw | type_debug) in ['list', 'tuple'] else [mariadb_allowed_hosts_raw] }}
-
-- name: Enforce restricted MariaDB hosts
-  assert:
-    that:
-      - '%' not in mariadb_allowed_hosts_effective
-    fail_msg: 'mariadb_allowed_hosts cannot include % by default. Provide explicit host entries.'
 
 - name: Create LXC container
   community.general.proxmox:
@@ -64,11 +53,12 @@
   delegate_to: "{{ container_ip }}"
   become: true
   apt:
-    name: "{{ lxc_config.setup.packages }}"
+    name: "{{ lxc_config.setup.packages | default([]) }}"
     state: present
     update_cache: yes
   environment:
     DEBIAN_FRONTEND: noninteractive
+  when: lxc_config.setup.packages is defined and lxc_config.setup.packages | length > 0
 
 - name: Write config files
   delegate_to: "{{ container_ip }}"
@@ -76,9 +66,8 @@
   copy:
     content: "{{ item.content }}"
     dest: "{{ item.path }}"
-    mode: "0644"
+    mode: "{{ item.mode | default('0644') }}"
   loop: "{{ lxc_config.setup.config | default([]) }}"
-  notify: Restart MariaDB
 
 - name: Enable and start services
   delegate_to: "{{ container_ip }}"
@@ -95,42 +84,4 @@
   become: true
   command: "{{ item }}"
   loop: "{{ lxc_config.setup.commands | default([]) }}"
-  when: lxc_config.setup.commands is defined
-
-- name: Secure MariaDB root account
-  delegate_to: "{{ container_ip }}"
-  become: true
-  community.mysql.mysql_user:
-    login_unix_socket: /var/run/mysqld/mysqld.sock
-    name: root
-    host: localhost
-    password: "{{ mariadb_root_password }}"
-    check_implicit_admin: true
-    state: present
-  no_log: true
-
-- name: Ensure MariaDB database exists
-  delegate_to: "{{ container_ip }}"
-  become: true
-  community.mysql.mysql_db:
-    name: "{{ mariadb_database }}"
-    state: present
-    login_unix_socket: /var/run/mysqld/mysqld.sock
-    login_user: root
-    login_password: "{{ mariadb_root_password }}"
-  no_log: true
-
-- name: Ensure MariaDB user exists with limited hosts
-  delegate_to: "{{ container_ip }}"
-  become: true
-  community.mysql.mysql_user:
-    name: "{{ mariadb_user }}"
-    password: "{{ mariadb_user_password }}"
-    host: "{{ item }}"
-    priv: "{{ mariadb_database }}.*:ALL"
-    login_unix_socket: /var/run/mysqld/mysqld.sock
-    login_user: root
-    login_password: "{{ mariadb_root_password }}"
-    state: present
-  loop: "{{ mariadb_allowed_hosts_effective }}"
-  no_log: true
+  when: lxc_config.setup.commands is defined and lxc_config.setup.commands | length > 0

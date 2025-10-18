@@ -1,23 +1,20 @@
+{% set unit = service_unit | default({}) %}
+{% set description = unit.description | default('Managed service for ' ~ (service_name | default(service_id))) %}
+{% set after = unit.after | default(['network.target']) %}
+{% set service_section = unit.service | default({'Type': 'simple', 'ExecStart': '/usr/bin/true'}) %}
+{% set install_targets = unit.install_wanted_by | default(['multi-user.target']) %}
 [Unit]
-Description=MariaDB Database Server
-After=network.target
+Description={{ description }}
+{% for dependency in after %}
+After={{ dependency }}
+{% endfor %}
 
 [Service]
-Type=notify
-User=mysql
-Group=mysql
-
-ExecStartPre=/usr/bin/install -d -m 755 -o mysql -g mysql /var/run/mysqld
-ExecStart=/usr/sbin/mariadbd --basedir=/usr
-
-Restart=on-failure
-RestartSec=5s
-
-# Security
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
-ProtectHome=true
+{% for key, value in service_section.items() %}
+{{ key }}={{ value }}
+{% endfor %}
 
 [Install]
-WantedBy=multi-user.target
+{% for target in install_targets %}
+WantedBy={{ target }}
+{% endfor %}
