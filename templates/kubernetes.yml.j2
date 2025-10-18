@@ -11,6 +11,9 @@
 {% if drop_caps_default is string %}{% set drop_caps_default = [drop_caps_default] %}{% endif %}
 {% set no_new_privs = security.no_new_privileges if security.no_new_privileges is defined else true %}
 {% set allow_priv_escalation = security.allow_privilege_escalation if security.allow_privilege_escalation is defined else (not no_new_privs) %}
+{% set ingress_spec = ingress | default({}) %}
+{% set ingress_routes = ingress_spec.routes | default([]) %}
+{% set ingress_enabled = (ingress_spec.enabled if ingress_spec is mapping and ingress_spec.enabled is not none else (ingress_routes | length > 0)) %}
 {% set k8s_ephemeral = namespace(items=[]) %}
 {% for mount in ephemeral_mounts %}
   {% set apply_targets = mount.apply_to | default(default_apply_targets) %}
@@ -226,3 +229,45 @@ spec:
     - port: {{ service_port }}
       targetPort: {{ container_port }}
   type: ClusterIP
+{% if ingress_enabled and ingress_routes %}
+{% set tls_map = {} %}
+{% for route in ingress_routes %}
+  {% set tls = route.tls | default({}) %}
+  {% if tls.certificate_secret is defined and tls.certificate_secret %}
+    {% set secret_hosts = tls_map.get(tls.certificate_secret, []) + [route.host] %}
+    {% set tls_map = tls_map | combine({tls.certificate_secret: secret_hosts | unique}) %}
+  {% endif %}
+{% endfor %}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ svc_name }}
+  namespace: {{ namespace }}
+  labels:
+    app: {{ svc_name }}
+spec:
+  rules:
+{% for route in ingress_routes %}
+    - host: {{ route.host }}
+      http:
+        paths:
+          - path: {{ route.path_prefix | default('/') }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ svc_name }}
+                port:
+                  number: {{ service_port }}
+{% endfor %}
+{% if tls_map %}
+  tls:
+{% for secret, hosts in tls_map.items() %}
+    - secretName: {{ secret }}
+      hosts:
+{% for host in hosts %}
+        - {{ host }}
+{% endfor %}
+{% endfor %}
+{% endif %}
+{% endif %}

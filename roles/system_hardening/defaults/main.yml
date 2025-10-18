@@ -1,4 +1,5 @@
 ---
+system_hardening_enabled: false
 hardening_ssh_port: 6922
 hardening_authorized_users: []  # list of {name: user, key: ssh-rsa ...}
 hardening_fail2ban_maxretry: 3
@@ -39,6 +40,7 @@ hardening_aide_new_db_path: /var/lib/aide/aide.db.new.gz
 hardening_firewalld_zone: public
 hardening_firewalld_services: []
 hardening_firewalld_ports: []
+system_hardening_allowed_ports: []
 hardening_enable_cockpit: false
 hardening_cockpit_listen_address: 127.0.0.1
 hardening_cockpit_allowed_sources: []

@@ -1,15 +1,22 @@
 ---
-- name: Gather package facts
-  ansible.builtin.package_facts:
-    manager: auto
+- name: System hardening disabled notice
+  ansible.builtin.debug:
+    msg: "System hardening role skipped because system_hardening_enabled=false"
+  when: not system_hardening_enabled | bool
 
-- name: Include common hardening tasks
-  ansible.builtin.import_tasks: common.yml
+- block:
+    - name: Gather package facts
+      ansible.builtin.package_facts:
+        manager: auto
 
-- name: Include Debian family hardening
-  ansible.builtin.include_tasks: debian.yml
-  when: ansible_os_family == 'Debian'
+    - name: Include common hardening tasks
+      ansible.builtin.import_tasks: common.yml
 
-- name: Include Red Hat family hardening
-  ansible.builtin.include_tasks: redhat.yml
-  when: ansible_os_family == 'RedHat'
+    - name: Include Debian family hardening
+      ansible.builtin.include_tasks: debian.yml
+      when: ansible_os_family == 'Debian'
+
+    - name: Include Red Hat family hardening
+      ansible.builtin.include_tasks: redhat.yml
+      when: ansible_os_family == 'RedHat'
+  when: system_hardening_enabled | bool

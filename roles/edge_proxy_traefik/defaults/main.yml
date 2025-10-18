@@ -6,3 +6,7 @@ traefik_config_mode: "0640"
 traefik_config_file: "{{ traefik_dynamic_config_dir }}/ingress.yml"
 traefik_reload_command: "systemctl reload traefik"
 traefik_manage_service: true
+traefik_binary: /usr/bin/traefik
+traefik_static_config_file: /etc/traefik/traefik.yml
+traefik_validate_before_reload: true
+traefik_validate_command: "{{ traefik_binary }} --configFile {{ traefik_static_config_file }} --validate=true"

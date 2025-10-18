@@ -10,6 +10,7 @@ Deploy services as LXC containers on Proxmox VE with predictable networking and 
 - Package installation inside the container uses non-interactive APT and applies any rendered configuration or command hooks.
 - `mounts.ephemeral_mounts` entries render as systemd drop-ins (`TemporaryFileSystem=`) inside the guest so writable areas stay tmpfs backed.
 - A default `keyctl=0` feature is applied when you omit `service_container.features`, keeping the kernel keyring disabled unless explicitly required.
+- `service_resources` and `service_storage_*` fields translate directly into LXC CPU, memory, and disk allocations. The generated manifest documents cgroup limits while preserving unprivileged defaults.
 
 ## Prerequisites
 
@@ -67,7 +68,33 @@ setup:
     - name: sample-service
       enabled: true
       state: started
+  commands:
+    - /usr/bin/true
 ```
+
+## Resource tuning
+
+Define realistic resource defaults alongside the service contract so Proxmox
+allocations match production expectations:
+
+```yaml
+service_resources:
+  memory_mb: 512
+  cpu_cores: 1
+service_storage_gb: 5
+service_container:
+  vmid: 200
+  cores: 1
+  memory: 512
+  swap: 512
+  disk: 5
+  unprivileged: yes
+```
+
+The template surfaces these values directly in the rendered manifest and calls
+out cgroup limits, preserving the unprivileged LXC posture. Mount points follow
+the UID/GID declared through `service_security`, so backups and runtime mounts
+line up without additional post-processing.
 
 ## Execution flow
 
