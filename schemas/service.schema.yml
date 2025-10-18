@@ -139,6 +139,9 @@ properties:
         type: integer
       cpu_cores:
         type: number
+      connections_per_second:
+        type: integer
+        minimum: 1
   service_namespace:
     type: string
   service_replicas:

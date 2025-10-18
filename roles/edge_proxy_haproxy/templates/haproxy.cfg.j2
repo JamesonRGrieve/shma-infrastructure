@@ -48,4 +48,9 @@ backend {{ backend.service_id }}
   option httpchk
   http-check send meth GET uri {{ backend.path_prefix if backend.path_prefix != '/' else '/' }}
   server {{ backend.service_id }} {{ backend.exports.APP_BACKEND_IP }}:{{ backend.exports.APP_PORT }} check
+{% if backend.websocket | default(false) %}
+  acl upgrade_websocket hdr(Upgrade) -i WebSocket
+  http-request set-header Connection "upgrade" if upgrade_websocket
+  http-response set-header Connection "upgrade" if { res.hdr(Upgrade) -i WebSocket }
+{% endif %}
 {% endfor %}

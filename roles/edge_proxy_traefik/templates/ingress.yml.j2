@@ -7,19 +7,40 @@ http:
         - {{ backend.router_entrypoint }}
       rule: "Host(`{{ backend.exports.APP_FQDN }}`){% if backend.path_prefix != '/' %} && PathPrefix(`{{ backend.path_prefix }}`){% endif %}"
       service: {{ backend.service_id }}
+{% set router_middlewares = backend.middlewares | default([]) %}
+{% if backend.websocket | default(false) %}
+  {% set router_middlewares = router_middlewares + [backend.service_id ~ '-websocket'] %}
+{% endif %}
 {% if backend.tls %}
       tls:
 {% if backend.tls_certresolver %}
         certResolver: {{ backend.tls_certresolver }}
 {% endif %}
 {% endif %}
-{% if backend.middlewares %}
+{% if router_middlewares %}
       middlewares:
-{% for middleware in backend.middlewares %}
+{% for middleware in router_middlewares %}
         - {{ middleware }}
 {% endfor %}
 {% endif %}
 {% endfor %}
+{% set websocket_ns = namespace(items=[]) %}
+{% for backend in edge_ingress_backends | default([]) %}
+  {% if backend.websocket | default(false) %}
+    {% set _ = websocket_ns.items.append(backend) %}
+  {% endif %}
+{% endfor %}
+{% if websocket_ns.items %}
+  middlewares:
+{% for backend in websocket_ns.items %}
+    {{ backend.service_id }}-websocket:
+      headers:
+        customRequestHeaders:
+          Connection: "Upgrade"
+        customResponseHeaders:
+          Connection: "Upgrade"
+{% endfor %}
+{% endif %}
   services:
 {% for backend in edge_ingress_backends | default([]) %}
     {{ backend.service_id }}:

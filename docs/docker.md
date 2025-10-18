@@ -83,6 +83,8 @@ networks:
 - `mounts.persistent_volumes` names directories that require backups, while `mounts.ephemeral_mounts` defines tmpfs-backed paths for runtimes that support them.
 - `service_security` customises the default non-root, read-only security posture when a workload needs explicit relaxations.
 - `service_image` values should be pinned by digest; promote a new digest only after it passes your CI scanning gates.
+- `service_resources.connections_per_second` propagates to a `CONNECTIONS_PER_SECOND` environment variable so nginx/envoy
+  sidecars can enforce per-pod limits in front of the workload.
 
 ## Validating the render
 

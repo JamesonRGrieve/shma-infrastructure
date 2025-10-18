@@ -9,6 +9,8 @@ Render Kubernetes manifests with Secret integration, readiness probes, hostPath-
 - Liveness and readiness probes originate from `health.cmd`, keeping checks consistent across runtimes.
 - Volume definitions now support `service_volumes.host_path`, which renders a `hostPath` mount when you want container filesystems to remain ephemeral while data persists on the node. Set `host_path_type` when you need a specific Kubernetes `hostPath` strategy.
 - Pin `service_image` values by digest; the rendered Deployment references that immutable identifier so rollouts remain deliberate.
+- `service_resources.connections_per_second` emits a `CONNECTIONS_PER_SECOND` environment variable that rate-limiting sidecars
+  (nginx/envoy) can use to clamp per-pod connection bursts.
 
 ## Prerequisites
 

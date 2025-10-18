@@ -68,6 +68,23 @@ When services publish `exports.env` on disk instead of directly through
 setting `exports_env_path`. The role reads the file on the target host, parses
 it, and merges it into the consolidated backend map.
 
+### DNS workflow
+
+The edge roles do not manage public DNS themselves. Each backend exports
+`APP_FQDN`, but an automation step must publish the record through either an
+`external-dns` deployment or a manual change in your DNS provider. The
+recommended flow is:
+
+1. Merge the service change so the ingress contract is available to the edge
+   hosts.
+2. Let `external-dns` reconcile the new hostname (preferred), or create the DNS
+   record by hand if you are operating without automated DNS.
+3. Apply the edge role to render and activate the proxy configuration once DNS
+   is in place.
+
+Until the DNS entry exists, clients will not reach the generated ingress even if
+the edge configuration is correct.
+
 ## Roles
 
 ### `edge_ingress`
