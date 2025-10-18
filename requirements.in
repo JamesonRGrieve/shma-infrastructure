@@ -1,0 +1,7 @@
+ansible==9.5.1
+ansible-lint==24.9.0
+check-jsonschema==0.28.4
+jsonschema==4.23.0
+pre-commit==3.8.0
+pyyaml==6.0.2
+yamllint==1.35.1

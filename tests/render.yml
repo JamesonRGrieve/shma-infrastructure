@@ -2,9 +2,13 @@
 - name: Render sample service runtime
   hosts: localhost
   gather_facts: false
-  vars_files:
-    - sample_service.yml
+  vars:
+    service_definition_file: "{{ service_definition_file | default('tests/sample_service.yml') }}"
   tasks:
+    - name: Load service definition
+      ansible.builtin.include_vars:
+        file: "{{ service_definition_file }}"
+
     - name: Render runtime configuration
-      include_role:
+      ansible.builtin.include_role:
         name: roles/common/render_runtime

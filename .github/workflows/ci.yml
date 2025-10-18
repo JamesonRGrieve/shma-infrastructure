@@ -5,84 +5,203 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint-and-validate:
-    name: "Lint and validate (${{ matrix.lane }})"
+    name: "Lint and validate (${{ matrix.lane }} · ${{ matrix.service_file }})"
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         lane: [stable, latest]
+        service_file:
+          - tests/sample_service.yml
+          - tests/samples/full.yml
+          - tests/samples/minimal.yml
+          - tests/samples/with_secrets.yml
+          - tests/samples/with_pvc.yml
     env:
-      SAMPLE_SERVICE_ID: sample-service
+      SERVICE_FILE: ${{ matrix.service_file }}
+      PYTHONUNBUFFERED: "1"
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@b4ffde65f463d58a31b38cfa6d26b4f752063b9
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@13f3840a65875556b0f1a6d6e5d79d993d3f5a6b
         with:
           python-version: '3.11'
+
+      - name: Cache pip
+        uses: actions/cache@13dac90522f915087a5de3c972d4d68512c964b0
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ansible ansible-lint yamllint jsonschema pyyaml
+          pip install --requirement requirements.txt
 
       - name: Install Ansible collections
         run: ansible-galaxy collection install -r ci/collections-${{ matrix.lane }}.yml
 
-      - name: Verify Docker Compose availability
-        run: docker compose version
+      - name: Install additional tooling
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
+          mv actionlint/actionlint "$HOME/.local/bin/actionlint"
+          rm -rf actionlint
+          curl -fsSL https://github.com/zricethezav/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz -o gitleaks.tar.gz
+          curl -fsSL https://github.com/zricethezav/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_checksums.txt -o gitleaks_checksums.txt
+          grep gitleaks_8.18.2_linux_x64.tar.gz gitleaks_checksums.txt | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          mv gitleaks "$HOME/.local/bin/gitleaks"
+          rm gitleaks.tar.gz gitleaks_checksums.txt
+          curl -fsSL https://github.com/open-policy-agent/conftest/releases/download/v0.48.0/conftest_0.48.0_Linux_x86_64.tar.gz -o conftest.tar.gz
+          echo "f3f9fa4c8ad5ac2ffb5f3eeb8000d10a229cc3f0e96a4b8b3b3aa259b91c8d1d  conftest.tar.gz" | sha256sum -c -
+          tar -xzf conftest.tar.gz conftest
+          mv conftest "$HOME/.local/bin/conftest"
+          rm conftest.tar.gz
+          curl -fsSL https://github.com/aquasecurity/trivy/releases/download/v0.54.1/trivy_0.54.1_Linux-64bit.tar.gz -o trivy.tar.gz
+          curl -fsSL https://github.com/aquasecurity/trivy/releases/download/v0.54.1/trivy_0.54.1_checksums.txt -o trivy_checksums.txt
+          grep trivy_0.54.1_Linux-64bit.tar.gz trivy_checksums.txt | sha256sum -c -
+          tar -xzf trivy.tar.gz trivy
+          mv trivy "$HOME/.local/bin/trivy"
+          rm trivy.tar.gz trivy_checksums.txt
+          curl -fsSL https://github.com/sigstore/cosign/releases/download/v2.4.0/cosign-linux-amd64 -o "$HOME/.local/bin/cosign"
+          echo "2a052d27be27fa9982f227632a38f967e88be792e53aa58a56c9e45e4515f7f7  $HOME/.local/bin/cosign" | sha256sum -c -
+          chmod +x "$HOME/.local/bin/cosign"
+          curl -fsSL https://github.com/containerd/nerdctl/releases/download/v2.0.0/nerdctl-2.0.0-linux-amd64.tar.gz -o nerdctl.tar.gz
+          tar -xzf nerdctl.tar.gz nerdctl
+          mv nerdctl "$HOME/.local/bin/nerdctl"
+          rm nerdctl.tar.gz
 
-      - name: Set up kubectl (stable)
-        if: matrix.lane == 'stable'
-        uses: azure/setup-kubectl@v3
-        with:
-          version: 'v1.29.3'
+      - name: Install kubectl
+        run: |
+          version="${{ matrix.lane == 'stable' && 'v1.29.3' || 'v1.31.1' }}"
+          curl -fsSL https://dl.k8s.io/release/${version}/bin/linux/amd64/kubectl -o /tmp/kubectl
+          curl -fsSL https://dl.k8s.io/${version}/bin/linux/amd64/kubectl.sha256 -o /tmp/kubectl.sha256
+          echo "$(cat /tmp/kubectl.sha256)  /tmp/kubectl" | sha256sum -c -
+          chmod +x /tmp/kubectl
+          sudo mv /tmp/kubectl /usr/local/bin/kubectl
 
-      - name: Set up kubectl (latest)
-        if: matrix.lane == 'latest'
-        uses: azure/setup-kubectl@v3
-        with:
-          version: 'latest'
+      - name: Run gitleaks
+        run: gitleaks detect --no-banner --redact --source .
 
-      - name: Validate schema definition
-        run: python ci/validate_schema.py
+      - name: Run actionlint
+        run: actionlint
+
+      - name: Validate service schema and samples
+        run: python ci/validate_schema.py --examples tests/samples
+
+      - name: Run pre-commit checks
+        run: pre-commit run --all-files
+
+      - name: Determine service metadata
+        id: metadata
+        run: |
+          python - <<'PY'
+import os
+from pathlib import Path
+import yaml
+
+service_file = Path(os.environ['SERVICE_FILE'])
+with service_file.open('r', encoding='utf-8') as handle:
+    document = yaml.safe_load(handle)
+service_id = document['service_id']
+output_dir = Path('/tmp/ansible-runtime') / service_id
+with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
+    fh.write(f"service_id={service_id}\n")
+    fh.write(f"runtime_dir={output_dir}\n")
+PY
 
       - name: Run yamllint
         run: |
-          yamllint roles/common schemas templates/proxmox.yml.j2 templates/docker.yml.j2 templates/kubernetes.yml.j2 tests
+          yamllint roles/common schemas templates tests
 
       - name: Run ansible-lint
         run: ansible-lint roles/common tests/render.yml
 
       - name: Render Proxmox configuration
-        run: ansible-playbook tests/render.yml -e runtime=proxmox
+        run: ansible-playbook tests/render.yml -e runtime=proxmox -e service_definition_file=${{ matrix.service_file }}
 
-      - name: Validate Proxmox manifest
-        run: yamllint /tmp/ansible-runtime/${{ env.SAMPLE_SERVICE_ID }}/proxmox.yml
+      - name: Validate Proxmox manifest structure
+        run: python ci/validate_proxmox_manifest.py --service-definition ${{ matrix.service_file }} ${{ steps.metadata.outputs.runtime_dir }}/proxmox.yml
 
       - name: Render Docker Compose configuration
-        run: ansible-playbook tests/render.yml -e runtime=docker
+        run: ansible-playbook tests/render.yml -e runtime=docker -e service_definition_file=${{ matrix.service_file }}
 
       - name: Validate Docker Compose manifest
-        run: docker compose -f /tmp/ansible-runtime/${{ env.SAMPLE_SERVICE_ID }}/docker.yml config
+        run: docker compose -f ${{ steps.metadata.outputs.runtime_dir }}/docker.yml config
 
       - name: Render Podman Quadlet configuration
-        run: ansible-playbook tests/render.yml -e runtime=podman
+        run: ansible-playbook tests/render.yml -e runtime=podman -e service_definition_file=${{ matrix.service_file }}
 
       - name: Validate Quadlet unit
-        run: systemd-analyze verify /tmp/ansible-runtime/${{ env.SAMPLE_SERVICE_ID }}/podman.yml
+        run: systemd-analyze verify ${{ steps.metadata.outputs.runtime_dir }}/podman.yml
 
       - name: Render bare-metal systemd configuration
-        run: ansible-playbook tests/render.yml -e runtime=baremetal
+        run: ansible-playbook tests/render.yml -e runtime=baremetal -e service_definition_file=${{ matrix.service_file }}
 
       - name: Validate systemd unit
-        run: systemd-analyze verify /tmp/ansible-runtime/${{ env.SAMPLE_SERVICE_ID }}/baremetal.yml
+        run: systemd-analyze verify ${{ steps.metadata.outputs.runtime_dir }}/baremetal.yml
 
       - name: Render Kubernetes manifests
-        run: ansible-playbook tests/render.yml -e runtime=kubernetes
+        run: ansible-playbook tests/render.yml -e runtime=kubernetes -e service_definition_file=${{ matrix.service_file }}
 
-      - name: Validate Kubernetes manifest
-        run: kubectl apply --dry-run=client --validate=true -f /tmp/ansible-runtime/${{ env.SAMPLE_SERVICE_ID }}/kubernetes.yml
+      - name: Validate Kubernetes manifest (client)
+        run: kubectl apply --dry-run=client --validate=true -f ${{ steps.metadata.outputs.runtime_dir }}/kubernetes.yml
+
+      - name: Validate Kubernetes manifest (server)
+        run: |
+          kind_version="v0.22.0"
+          curl -fsSL https://github.com/kubernetes-sigs/kind/releases/download/${kind_version}/kind-linux-amd64 -o /tmp/kind
+          echo "fa28e8a3d51d38958cd97df1d3b1120686afa6462d39d7496b3fd1d195e27eb0  /tmp/kind" | sha256sum -c -
+          chmod +x /tmp/kind
+          sudo mv /tmp/kind /usr/local/bin/kind
+          kind create cluster --name ci-${{ steps.metadata.outputs.service_id }}
+          kubectl apply --dry-run=server --validate=strict -f ${{ steps.metadata.outputs.runtime_dir }}/kubernetes.yml
+          kubectl diff -f ${{ steps.metadata.outputs.runtime_dir }}/kubernetes.yml || true
+          kind delete cluster --name ci-${{ steps.metadata.outputs.service_id }}
+
+      - name: Assert secrets are not inlined in manifests
+        run: |
+          python ci/assert_no_inline_secrets.py ${{ matrix.service_file }} \
+            ${{ steps.metadata.outputs.runtime_dir }}/docker.yml \
+            ${{ steps.metadata.outputs.runtime_dir }}/podman.yml \
+            ${{ steps.metadata.outputs.runtime_dir }}/kubernetes.yml
+
+      - name: Run Conftest policies
+        run: conftest test ${{ matrix.service_file }} policy
+
+      - name: Scan referenced container images
+        run: |
+          python - <<'PY'
+import json
+import sys
+from pathlib import Path
+import yaml
+
+service_file = Path("${{ matrix.service_file }}")
+document = yaml.safe_load(service_file.read_text())
+image = document.get("service_image")
+if not image:
+    sys.exit(0)
+print(image)
+PY
+          | while read -r image; do
+              trivy image --exit-code 1 --severity CRITICAL --quiet "$image" || exit 1
+            done
+
+      - name: Cosign policy check
+        run: cosign version

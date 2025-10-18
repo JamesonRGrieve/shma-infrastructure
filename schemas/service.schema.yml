@@ -174,6 +174,8 @@ properties:
         type: string
       features:
         type: string
+  needs_container_runtime:
+    type: boolean
   service_volume:
     type: object
   version:
@@ -247,3 +249,34 @@ properties:
               type: string
   runtime_templates:
     type: object
+  kubernetes:
+    type: object
+    properties:
+      pvc:
+        type: object
+        required:
+          - name
+          - size
+        properties:
+          name:
+            type: string
+          size:
+            type: string
+          storageClassName:
+            type: string
+allOf:
+  - if:
+      properties:
+        service_container:
+          type: object
+          properties:
+            features:
+              type: string
+      required:
+        - service_container
+    then:
+      required:
+        - needs_container_runtime
+      properties:
+        needs_container_runtime:
+          const: true

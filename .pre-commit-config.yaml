@@ -1,0 +1,36 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        additional_dependencies: []
+  - repo: https://github.com/ansible/ansible-lint
+    rev: v24.9.0
+    hooks:
+      - id: ansible-lint
+        additional_dependencies: []
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: 0.28.4
+    hooks:
+      - id: check-jsonschema
+        name: check service schema definition
+        files: ^schemas/service\.schema\.yml$
+        args:
+          - --schemafile
+          - schemas/service.schema.yml
+          - --check-type
+          - yaml
+          - schemas/service.schema.yml
+  - repo: local
+    hooks:
+      - id: validate-ci-schema
+        name: validate schema against samples
+        entry: python ci/validate_schema.py --examples tests/samples
+        language: system
+        pass_filenames: false

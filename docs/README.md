@@ -15,8 +15,9 @@ A runtime-agnostic infrastructure-as-code framework for deploying self-hosted ap
 ### Install toolchain
 
 ```bash
-pip install ansible ansible-lint yamllint jsonschema pyyaml
+python -m pip install --requirement requirements.txt
 ansible-galaxy collection install -r ci/collections-stable.yml
+pre-commit install
 ```
 
 ### Render a runtime locally
@@ -96,13 +97,11 @@ The registry keeps validation decoupled from the Ansible inventory while ensurin
 
 `.github/workflows/ci.yml` performs the following on every push and pull request:
 
-1. Lint YAML (`yamllint`) and Ansible (`ansible-lint`).
-2. Validate `schemas/service.schema.yml` with `jsonschema`.
-3. Render sample manifests for each runtime via `tests/render.yml` and `tests/sample_service.yml`.
-4. Validate the generated artifacts:
-   - `yamllint` for Proxmox config.
-   - `docker compose config` for Compose.
-   - `systemd-analyze verify` for Quadlet and bare-metal service units.
-   - `kubectl apply --dry-run=client --validate=true` for Kubernetes manifests.
+1. Lints and policy checks via `pre-commit`, `yamllint`, `ansible-lint`, `conftest`, `gitleaks`, and `actionlint`.
+2. Validates the service schema and the curated sample definitions.
+3. Renders each runtime for every sample service and verifies the generated artifacts with the runtime CLIs, including Compose, Quadlet, Kubernetes (client and server dry-runs), and Proxmox schema validation.
+4. Runs security gates such as Trivy vulnerability scanning and cosign availability checks.
+
+Enable branch protection on `main` (require pull requests, forbid bypass, and enforce the CI workflow) to keep the pipeline authoritative.
 
 Use the same steps locally before submitting changes to keep CI green.

@@ -1,0 +1,86 @@
+---
+type: object
+required:
+  - container_ip
+  - container
+  - setup
+properties:
+  container_ip:
+    type: string
+  container:
+    type: object
+    required:
+      - vmid
+      - hostname
+      - ostemplate
+      - disk
+      - cores
+      - memory
+      - swap
+      - netif
+      - onboot
+      - unprivileged
+    properties:
+      vmid:
+        type: string
+      hostname:
+        type: string
+      ostemplate:
+        type: string
+      disk:
+        type: string
+      cores:
+        type: string
+      memory:
+        type: string
+      swap:
+        type: string
+      netif:
+        type: object
+        additionalProperties:
+          type: string
+      onboot:
+        type: string
+      unprivileged:
+        type: string
+      features:
+        type: string
+  setup:
+    type: object
+    required:
+      - packages
+      - config
+      - services
+      - commands
+    properties:
+      packages:
+        type: array
+        items:
+          type: string
+      config:
+        type: array
+        items:
+          type: object
+          properties:
+            path:
+              type: string
+            content:
+              type: string
+            mode:
+              type: string
+      services:
+        type: array
+        items:
+          type: object
+          properties:
+            name:
+              type: string
+            enabled:
+              type: boolean
+            state:
+              type: string
+      commands:
+        type: array
+        items:
+          type: string
+additionalProperties: false
