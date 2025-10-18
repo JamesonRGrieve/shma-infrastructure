@@ -1,8 +1,4 @@
-{% set default_secret_env = [
-  {'name': 'MYSQL_ROOT_PASSWORD', 'value': mariadb_root_password},
-  {'name': 'MYSQL_PASSWORD', 'value': mariadb_user_password}
-] %}
-{% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else default_secret_env %}
+{% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] %}
 {% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
 {% set quadlet_scope_value = quadlet_scope | default('system') %}
 {% if quadlet_scope_value == 'user' %}
@@ -10,28 +6,36 @@
 {% else %}
 {% set quadlet_base_dir = '/etc/containers/systemd' %}
 {% endif %}
-{% set env_file_path = quadlet_base_dir ~ '/' ~ mariadb_hostname ~ '.env' %}
+{% set env_file_path = quadlet_base_dir ~ '/' ~ (service_name | default(service_id)) ~ '.env' %}
 {% set secret_dir = quadlet_base_dir ~ '/secrets' %}
+{% set ports = service_ports | default((service_port is defined) | ternary([service_port], [])) %}
+{% set volumes = service_volumes | default([]) %}
+{% set inline_env = service_env | default([]) %}
 [Unit]
-Description=MariaDB Database
+Description={{ service_unit_description | default('Managed container for ' ~ (service_name | default(service_id))) }}
 After=network-online.target
 Wants=network-online.target
 
 [Container]
-Image=docker.io/library/mariadb:{{ version }}
-ContainerName={{ mariadb_hostname }}
+Image={{ service_image }}
+ContainerName={{ service_name | default(service_id) }}
 AutoUpdate=registry
-Environment=MYSQL_DATABASE={{ mariadb_database }}
-Environment=MYSQL_USER={{ mariadb_user }}
+{% for env in inline_env %}
+Environment={{ env.name }}={{ env.value }}
+{% endfor %}
 {% if secret_env %}
 EnvironmentFile={{ env_file_path }}
 {% endif %}
-Volume=mariadb-data.volume:/var/lib/mysql:Z
-PublishPort={{ mariadb_ip }}:3306:3306
+{% for vol in volumes %}
+Volume={{ vol.source | default(vol.name) }}.volume:{{ vol.target }}:{% if vol.mode is defined %}{{ vol.mode }}{% else %}Z{% endif %}
+{% endfor %}
 {% for secret in file_secrets %}
 Volume={{ secret_dir }}/{{ secret.name }}:{{ secret.target | default('/run/secrets/' ~ secret.name) }}:ro,Z
 {% endfor %}
-HealthCmd={{ (health.cmd | default(['mysqladmin', 'ping', '-h', 'localhost'])) | join(' ') }}
+{% for port in ports %}
+PublishPort={{ port.host_ip | default('') }}{% if port.host_ip is defined and port.host_ip | string | length > 0 %}:{% endif %}{{ port.published | default(port.target) }}:{{ port.target }}{% if port.protocol is defined %}/{{ port.protocol }}{% endif %}
+{% endfor %}
+HealthCmd={{ (health.cmd | default(['true'])) | join(' ') }}
 HealthInterval={{ health.interval | default('10s') }}
 HealthTimeout={{ health.timeout | default('5s') }}
 HealthRetries={{ health.retries | default(3) }}

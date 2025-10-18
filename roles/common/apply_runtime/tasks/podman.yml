@@ -2,30 +2,24 @@
 - name: Determine quadlet scope
   set_fact:
     quadlet_effective_scope: "{{ quadlet_scope | default('system') }}"
-    quadlet_unit_name: "{{ service_id | default(mariadb_hostname) }}"
+    quadlet_unit_name: "{{ service_unit_name | default(service_id) }}"
 
 - name: Resolve quadlet paths
   set_fact:
     quadlet_base_dir: "{{ (quadlet_effective_scope == 'user') | ternary((ansible_env.HOME | default(lookup('env', 'HOME'))) + '/.config/containers/systemd', '/etc/containers/systemd') }}"
-    quadlet_env_path: "{{ ((quadlet_effective_scope == 'user') | ternary((ansible_env.HOME | default(lookup('env', 'HOME'))) + '/.config/containers/systemd', '/etc/containers/systemd')) + '/' + (mariadb_hostname) + '.env' }}"
+    quadlet_env_path: "{{ ((quadlet_effective_scope == 'user') | ternary((ansible_env.HOME | default(lookup('env', 'HOME'))) + '/.config/containers/systemd', '/etc/containers/systemd')) + '/' + (service_name | default(service_id)) + '.env' }}"
     quadlet_secret_dir: "{{ ((quadlet_effective_scope == 'user') | ternary((ansible_env.HOME | default(lookup('env', 'HOME'))) + '/.config/containers/systemd/secrets', '/etc/containers/systemd/secrets')) }}"
 
 - name: Resolve Quadlet secrets
   set_fact:
-    quadlet_secret_env: {{ (secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else []) }}
-    quadlet_secret_files: {{ secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] }}
-
-- name: Apply default secret environment values when unspecified
-  set_fact:
-    quadlet_secret_env: {{ quadlet_secret_env + [
-      {'name': 'MYSQL_ROOT_PASSWORD', 'value': mariadb_root_password},
-      {'name': 'MYSQL_PASSWORD', 'value': mariadb_user_password}
-    ] if quadlet_secret_env | length == 0 else quadlet_secret_env }}
+    quadlet_secret_env: "{{ secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] }}"
+    quadlet_secret_files: "{{ secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] }}"
 
 - name: Deduplicate quadlet secret environment variables
   set_fact:
     quadlet_secret_env: >-
       {{ quadlet_secret_env | reverse | unique(attribute='name') | reverse }}
+  when: quadlet_secret_env | length > 0
 
 - name: Ensure quadlet directory exists
   file:
@@ -50,6 +44,7 @@
       {% for item in quadlet_secret_env %}
       {{ item.name }}={{ item.value }}
       {% endfor %}
+  when: quadlet_secret_env | length > 0
   no_log: true
   become: {{ (quadlet_effective_scope == 'system') | bool }}
 
@@ -84,4 +79,4 @@
 
 - name: Set service IP for health checks
   set_fact:
-    service_ip: "{{ mariadb_ip }}"
+    service_ip: "{{ service_ip | default(ansible_default_ipv4.address) }}"

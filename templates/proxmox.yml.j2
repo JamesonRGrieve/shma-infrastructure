@@ -1,33 +1,43 @@
 ---
-container_ip: "{{ mariadb_ip }}"
+{% set container = service_container | default({}) %}
+{% set pkg_list = service_packages | default([]) %}
+{% set file_list = service_files | default([]) %}
+{% set svc_list = service_services | default([]) %}
+{% set cmd_list = service_commands | default([]) %}
+container_ip: "{{ service_ip }}"
 container:
-  vmid: "{{ mariadb_container_id }}"
-  hostname: "{{ mariadb_hostname }}"
-  ostemplate: "{{ proxmox_template | default('local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst') }}"
-  disk: "{{ mariadb_storage_gb }}"
-  cores: "{{ mariadb_cores }}"
-  memory: "{{ mariadb_memory }}"
-  swap: "{{ mariadb_memory }}"
+  vmid: "{{ container.vmid | default(service_id) }}"
+  hostname: "{{ container.hostname | default(service_name | default(service_id)) }}"
+  ostemplate: "{{ container.ostemplate | default(proxmox_template | default('local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst')) }}"
+  disk: "{{ container.disk | default(service_storage_gb | default(10)) }}"
+  cores: "{{ container.cores | default(service_resources.cpu_cores | default(1)) }}"
+  memory: "{{ container.memory | default(service_resources.memory_mb | default(512)) }}"
+  swap: "{{ container.swap | default(service_resources.memory_mb | default(512)) }}"
   netif:
-    net0: "name=eth0,bridge=vmbr0,ip={{ mariadb_ip }}/24,gw={{ gateway }}"
-  onboot: yes
-  unprivileged: yes
-  features: "nesting=1,keyctl=1"
+    net0: "name={{ container.interface | default('eth0') }},bridge={{ container.bridge | default('vmbr0') }},ip={{ service_ip }}/{{ container.cidr | default(24) }}{% if container.gateway is defined %},gw={{ container.gateway }}{% elif service_gateway is defined %},gw={{ service_gateway }}{% endif %}"
+  onboot: {{ container.onboot | default('yes') }}
+  unprivileged: {{ container.unprivileged | default('yes') }}
+  features: "{{ container.features | default('nesting=1,keyctl=1') }}"
 
 setup:
-  packages:
-    - mariadb-server
-    - mariadb-client
-    - python3-pymysql
-
-  config:
-    - path: /etc/mysql/mariadb.conf.d/99-custom.cnf
+  packages:{% if pkg_list | length == 0 %} []{% else %}
+{% for pkg in pkg_list %}
+    - {{ pkg }}
+{% endfor %}{% endif %}
+  config:{% if file_list | length == 0 %} []{% else %}
+{% for item in file_list %}
+    - path: {{ item.path }}
       content: |
-        [mysqld]
-        bind-address = {{ mariadb_bind_address | default(container_ip) }}
-        max_connections = 200
-
-  services:
-    - name: mariadb
-      enabled: true
-      state: started
+{{ item.content | indent(8, true) }}{% if item.mode is defined %}
+      mode: {{ item.mode }}{% endif %}
+{% endfor %}{% endif %}
+  services:{% if svc_list | length == 0 %} []{% else %}
+{% for svc in svc_list %}
+    - name: {{ svc.name }}
+      enabled: {{ svc.enabled | default(true) | ternary(true, false) }}
+      state: {{ svc.state | default('started') }}
+{% endfor %}{% endif %}
+  commands:{% if cmd_list | length == 0 %} []{% else %}
+{% for cmd in cmd_list %}
+    - {{ cmd }}
+{% endfor %}{% endif %}

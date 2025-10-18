@@ -1,13 +1,67 @@
-service_id: mariadb
+service_id: example-db
+service_name: example-db
+service_unit_name: example-db
+service_image: docker.io/library/mariadb:10.11
 version: "10.11"
-
-runtime_templates:
-  proxmox: templates/proxmox.yml.j2
-  docker: templates/docker.yml.j2
-  podman: templates/podman.yml.j2
-  kubernetes: templates/kubernetes.yml.j2
-  baremetal: templates/baremetal.yml.j2
-
+service_ip: 192.0.2.50
+service_ports:
+  - target: 3306
+    published: 3306
+    host_ip: 192.0.2.50
+service_env:
+  - name: MYSQL_DATABASE
+    value: sampledb
+  - name: MYSQL_USER
+    value: sample
+service_volumes:
+  - name: data
+    source: example-db-data
+    target: /var/lib/mysql
+    driver: local
+service_packages:
+  - mariadb-server
+  - mariadb-client
+service_files:
+  - path: /etc/example-db/config.env
+    mode: '0640'
+    content: |
+      MYSQL_DATABASE=sampledb
+      MYSQL_USER=sample
+service_services:
+  - name: example-db
+    enabled: true
+    state: started
+service_commands:
+  - /usr/bin/true
+service_resources:
+  memory_mb: 512
+  cpu_cores: 1
+service_namespace: sample
+service_replicas: 1
+service_storage_gb: 10
+service_gateway: 192.0.2.1
+service_container:
+  vmid: 200
+  hostname: example-db
+  ostemplate: local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst
+  disk: 10
+  cores: 1
+  memory: 512
+  swap: 512
+  bridge: vmbr0
+  cidr: 24
+  gateway: 192.0.2.1
+  interface: eth0
+  onboot: yes
+  unprivileged: yes
+  features: nesting=1,keyctl=1
+exports:
+  env:
+    - name: DATABASE_HOST
+      value: 192.0.2.50
+storage:
+  - name: data
+    path: /var/lib/mysql
 health:
   cmd:
     - mysqladmin
@@ -19,32 +73,12 @@ health:
   interval: 10s
   timeout: 5s
   retries: 3
-
-mariadb_hostname: mariadb-sample
-mariadb_container_id: 200
-mariadb_ip: 192.0.2.50
-mariadb_storage_gb: 10
-mariadb_memory: 512
-mariadb_cores: 1
-mariadb_database: sampledb
-mariadb_user: sample
-mariadb_root_password: sample-root
-mariadb_user_password: sample-user
-mariadb_allowed_hosts:
-  - 192.0.2.10
-mariadb_bind_address: 192.0.2.50
-
-proxmox_template: local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst
-gateway: 192.0.2.1
-proxmox_node: pve
-proxmox_api_user: test@pam
-proxmox_api_password: password
-proxmox_api_host: proxmox.local
-
-k8s_namespace: sample
-mariadb_replicas: 1
-quadlet_scope: system
-
+runtime_templates:
+  proxmox: templates/proxmox.yml.j2
+  docker: templates/docker.yml.j2
+  podman: templates/podman.yml.j2
+  kubernetes: templates/kubernetes.yml.j2
+  baremetal: templates/baremetal.yml.j2
 secrets:
   env:
     - name: MYSQL_ROOT_PASSWORD
@@ -54,5 +88,5 @@ secrets:
   files:
     - name: ca-cert
       value: "-----BEGIN CERTIFICATE-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA\n-----END CERTIFICATE-----"
-      target: /etc/mysql/certs/ca.pem
+      target: /etc/example-db/certs/ca.pem
       mode: '0400'

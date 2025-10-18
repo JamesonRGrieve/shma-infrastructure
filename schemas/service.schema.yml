@@ -2,6 +2,8 @@
 type: object
 required:
   - service_id
+  - service_name
+  - service_image
   - exports
   - storage
   - health
@@ -9,6 +11,171 @@ required:
 properties:
   service_id:
     type: string
+  service_name:
+    type: string
+  service_unit_name:
+    type: string
+  service_image:
+    type: string
+  service_ip:
+    type: string
+  service_port:
+    type: object
+    properties:
+      target:
+        type: integer
+      published:
+        type: integer
+      host_ip:
+        type: string
+      protocol:
+        type: string
+    required:
+      - target
+  service_ports:
+    type: array
+    items:
+      type: object
+      properties:
+        target:
+          type: integer
+        published:
+          type: integer
+        host_ip:
+          type: string
+        protocol:
+          type: string
+      required:
+        - target
+  service_env:
+    type: array
+    items:
+      type: object
+      required: [name, value]
+      properties:
+        name:
+          type: string
+        value:
+          type: string
+  service_volumes:
+    type: array
+    items:
+      type: object
+      required: [name, target]
+      properties:
+        name:
+          type: string
+        source:
+          type: string
+        target:
+          type: string
+        mode:
+          type: string
+        driver:
+          type: string
+        size:
+          type: string
+  service_networks:
+    type: array
+    items:
+      type: string
+  service_unit:
+    type: object
+    properties:
+      description:
+        type: string
+      after:
+        type: array
+        items:
+          type: string
+      service:
+        type: object
+      install_wanted_by:
+        type: array
+        items:
+          type: string
+  service_packages:
+    type: array
+    items:
+      type: string
+  service_files:
+    type: array
+    items:
+      type: object
+      required: [path, content]
+      properties:
+        path:
+          type: string
+        content:
+          type: string
+        mode:
+          type: string
+  service_services:
+    type: array
+    items:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        enabled:
+          type: boolean
+        state:
+          type: string
+  service_commands:
+    type: array
+    items:
+      type: string
+  service_resources:
+    type: object
+    properties:
+      memory_mb:
+        type: integer
+      cpu_cores:
+        type: number
+  service_namespace:
+    type: string
+  service_replicas:
+    type: integer
+  service_storage_gb:
+    type: integer
+  service_storage_size:
+    type: string
+  service_gateway:
+    type: string
+  service_container:
+    type: object
+    properties:
+      vmid:
+        type: integer
+      hostname:
+        type: string
+      ostemplate:
+        type: string
+      disk:
+        type: integer
+      cores:
+        type: integer
+      memory:
+        type: integer
+      swap:
+        type: integer
+      interface:
+        type: string
+      bridge:
+        type: string
+      cidr:
+        type: integer
+      gateway:
+        type: string
+      onboot:
+        type: string
+      unprivileged:
+        type: string
+      features:
+        type: string
+  service_volume:
+    type: object
   version:
     type: string
   requires:
