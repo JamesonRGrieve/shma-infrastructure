@@ -1,0 +1,51 @@
+service_id: sample-service
+service_name: sample-service
+service_unit_name: sample-service
+service_image: docker.io/library/nginx:latest
+service_ip: 192.0.2.50
+service_ports:
+  - target: 8080
+    published: 8080
+    host_ip: 192.0.2.50
+ingress:
+  enabled: true
+  routes:
+    - host: sample.example.test
+      port: 8080
+      path_prefix: "/"
+      websocket: true
+      sticky: cookie
+      health:
+        path: "/internal/health"
+        interval: "10s"
+        timeout: "3s"
+      tls:
+        mode: auto
+        hsts: true
+        alpn: ["h2", "http/1.1"]
+        acme:
+          challenge: dns
+          dns_provider: cloudflare
+          email: admin@example.test
+          wildcard: false
+      headers:
+        set:
+          - "X-Frame-Options: DENY"
+          - "X-Content-Type-Options: nosniff"
+        remove:
+          - "Server"
+      rate_limit:
+        requests_per_minute: 900
+        burst: 150
+      basic_auth:
+        secret: vault_ingress_auth
+runtime_templates:
+  podman: ../templates/podman.yml.j2
+exports:
+  env: []
+mounts:
+  persistent_volumes: []
+  ephemeral_mounts: []
+health:
+  cmd:
+    - /bin/true

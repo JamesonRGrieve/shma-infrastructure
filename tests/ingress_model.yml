@@ -1,0 +1,29 @@
+---
+- name: Build ingress model for sample service
+  hosts: localhost
+  gather_facts: false
+  vars:
+    service_definition_file: "{{ service_definition_file | default('tests/sample_service_ingress.yml') }}"
+  tasks:
+    - name: Load service definition with ingress intent
+      ansible.builtin.include_vars:
+        file: "{{ service_definition_file }}"
+        name: service_spec
+
+    - name: Generate ingress model
+      ansible.builtin.include_role:
+        name: ingress_model
+
+    - name: Assert ingress model built
+      ansible.builtin.assert:
+        that:
+          - ingress_enabled | bool
+          - ingress_edge_config | length == 1
+          - ingress_edge_config[0].hostname == 'sample.example.test'
+          - ingress_edge_config[0].upstreams[0].host == service_spec.service_ip
+          - ingress_metadata.spec_hash is defined
+        fail_msg: "Ingress model generation failed"
+
+    - name: Display ingress edge configuration
+      ansible.builtin.debug:
+        var: ingress_edge_config

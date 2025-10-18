@@ -6,6 +6,7 @@ from pathlib import Path
 
 import yaml
 from jsonschema import Draft202012Validator, ValidationError
+from jsonschema import RefResolver
 
 
 def load_yaml(path: Path) -> dict:
@@ -15,7 +16,17 @@ def load_yaml(path: Path) -> dict:
         raise ValueError(f"Failed to parse YAML file {path}: {exc}") from exc
 
 
-def validate_schema(schema_path: Path) -> dict | int:
+def build_validator(schema_path: Path, schema: dict) -> Draft202012Validator | int:
+    base_uri = schema_path.resolve().as_uri()
+    try:
+        resolver = RefResolver(base_uri=base_uri, referrer=schema)
+        return Draft202012Validator(schema, resolver=resolver)
+    except Exception as exc:  # pragma: no cover - validation error details vary
+        print(f"Schema validation failed: {exc}", file=sys.stderr)
+        return 1
+
+
+def validate_schema(schema_path: Path) -> tuple[dict, Draft202012Validator] | int:
     if not schema_path.exists():
         print(f"Schema file not found: {schema_path}", file=sys.stderr)
         return 1
@@ -26,17 +37,15 @@ def validate_schema(schema_path: Path) -> dict | int:
         print(exc, file=sys.stderr)
         return 1
 
-    try:
-        Draft202012Validator.check_schema(schema)
-    except Exception as exc:  # pragma: no cover - validation error details vary
-        print(f"Schema validation failed: {exc}", file=sys.stderr)
-        return 1
+    validator = build_validator(schema_path, schema)
+    if isinstance(validator, int):  # pragma: no cover - failure already logged
+        return validator
 
-    return schema
+    return schema, validator
 
 
-def validate_examples(schema: dict, examples_dir: Path) -> int:
-    validator = Draft202012Validator(schema)
+def validate_examples(validator: Draft202012Validator, examples_dir: Path) -> int:
+    schema = validator.schema
     failures: list[str] = []
 
     for example in sorted(examples_dir.glob("*.yml")):
@@ -100,9 +109,11 @@ def main() -> int:
     args = parser.parse_args()
 
     schema_path = Path("schemas/service.schema.yml")
-    schema = validate_schema(schema_path)
-    if isinstance(schema, int):  # pragma: no cover - failure already logged
-        return schema
+    schema_validation = validate_schema(schema_path)
+    if isinstance(schema_validation, int):  # pragma: no cover - failure already logged
+        return schema_validation
+
+    schema, validator = schema_validation
 
     print("Schema validation succeeded.")
 
@@ -111,7 +122,7 @@ def main() -> int:
         if not examples_dir.exists():
             print(f"Examples directory not found: {examples_dir}", file=sys.stderr)
             return 1
-        result = validate_examples(schema, examples_dir)
+        result = validate_examples(validator, examples_dir)
         if result != 0:
             return result
         print(f"Validated examples in {examples_dir}.")

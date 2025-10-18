@@ -83,6 +83,8 @@ properties:
     type: array
     items:
       type: string
+  ingress:
+    $ref: ingress.schema.yml
   service_unit:
     type: object
     properties:
