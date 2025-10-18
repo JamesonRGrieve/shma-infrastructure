@@ -3,6 +3,29 @@
   set_fact:
     lxc_config: "{{ lookup('file', runtime_config_path) | from_yaml }}"
 
+- name: Ensure container_ip is defined
+  assert:
+    that:
+      - lxc_config.container_ip is defined
+      - lxc_config.container_ip | length > 0
+    fail_msg: "Rendered Proxmox configuration must define container_ip"
+
+- name: Set container IP facts
+  set_fact:
+    container_ip: "{{ lxc_config.container_ip }}"
+    service_ip: "{{ lxc_config.container_ip }}"
+    mariadb_allowed_hosts_raw: {{ mariadb_allowed_hosts | default([lxc_config.container_ip]) }}
+
+- name: Normalize allowed host list
+  set_fact:
+    mariadb_allowed_hosts_effective: {{ mariadb_allowed_hosts_raw if (mariadb_allowed_hosts_raw | type_debug) in ['list', 'tuple'] else [mariadb_allowed_hosts_raw] }}
+
+- name: Enforce restricted MariaDB hosts
+  assert:
+    that:
+      - '%' not in mariadb_allowed_hosts_effective
+    fail_msg: 'mariadb_allowed_hosts cannot include % by default. Provide explicit host entries.'
+
 - name: Create LXC container
   community.general.proxmox:
     vmid: "{{ lxc_config.container.vmid }}"
@@ -19,6 +42,7 @@
     netif: "{{ lxc_config.container.netif }}"
     onboot: "{{ lxc_config.container.onboot }}"
     unprivileged: "{{ lxc_config.container.unprivileged }}"
+    features: "{{ lxc_config.container.features | default('nesting=1,keyctl=1') }}"
     state: present
 
 - name: Start container
@@ -32,26 +56,81 @@
 
 - name: Wait for container SSH
   wait_for:
-    host: "{{ lxc_config.container.netif.net0.split('ip=')[1].split('/')[0] }}"
+    host: "{{ container_ip }}"
     port: 22
-    delay: 5
-    timeout: 60
+    timeout: 120
 
 - name: Install packages in container
-  delegate_to: "{{ lxc_config.container.netif.net0.split('ip=')[1].split('/')[0] }}"
+  delegate_to: "{{ container_ip }}"
+  become: true
   apt:
     name: "{{ lxc_config.setup.packages }}"
     state: present
     update_cache: yes
+  environment:
+    DEBIAN_FRONTEND: noninteractive
 
 - name: Write config files
-  delegate_to: "{{ lxc_config.container.netif.net0.split('ip=')[1].split('/')[0] }}"
+  delegate_to: "{{ container_ip }}"
+  become: true
   copy:
     content: "{{ item.content }}"
     dest: "{{ item.path }}"
+    mode: "0644"
   loop: "{{ lxc_config.setup.config | default([]) }}"
+  notify: Restart MariaDB
 
-- name: Run setup commands
-  delegate_to: "{{ lxc_config.container.netif.net0.split('ip=')[1].split('/')[0] }}"
-  shell: "{{ item }}"
-  loop: "{{ lxc_config.setup.commands }}"
+- name: Enable and start services
+  delegate_to: "{{ container_ip }}"
+  become: true
+  systemd:
+    name: "{{ item.name }}"
+    enabled: "{{ item.enabled | default(true) }}"
+    state: "{{ item.state | default('started') }}"
+    daemon_reload: true
+  loop: "{{ lxc_config.setup.services | default([]) }}"
+
+- name: Run additional setup commands
+  delegate_to: "{{ container_ip }}"
+  become: true
+  command: "{{ item }}"
+  loop: "{{ lxc_config.setup.commands | default([]) }}"
+  when: lxc_config.setup.commands is defined
+
+- name: Secure MariaDB root account
+  delegate_to: "{{ container_ip }}"
+  become: true
+  community.mysql.mysql_user:
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    name: root
+    host: localhost
+    password: "{{ mariadb_root_password }}"
+    check_implicit_admin: true
+    state: present
+  no_log: true
+
+- name: Ensure MariaDB database exists
+  delegate_to: "{{ container_ip }}"
+  become: true
+  community.mysql.mysql_db:
+    name: "{{ mariadb_database }}"
+    state: present
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    login_user: root
+    login_password: "{{ mariadb_root_password }}"
+  no_log: true
+
+- name: Ensure MariaDB user exists with limited hosts
+  delegate_to: "{{ container_ip }}"
+  become: true
+  community.mysql.mysql_user:
+    name: "{{ mariadb_user }}"
+    password: "{{ mariadb_user_password }}"
+    host: "{{ item }}"
+    priv: "{{ mariadb_database }}.*:ALL"
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    login_user: root
+    login_password: "{{ mariadb_root_password }}"
+    state: present
+  loop: "{{ mariadb_allowed_hosts_effective }}"
+  no_log: true

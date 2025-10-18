@@ -1,5 +1,21 @@
 ---
+- name: Set service IP facts
+  set_fact:
+    service_ip: "{{ mariadb_bind_address | default(ansible_default_ipv4.address) }}"
+    mariadb_allowed_hosts_raw: {{ mariadb_allowed_hosts | default([mariadb_bind_address | default(ansible_default_ipv4.address)]) }}
+
+- name: Normalize allowed host list
+  set_fact:
+    mariadb_allowed_hosts_effective: {{ mariadb_allowed_hosts_raw if (mariadb_allowed_hosts_raw | type_debug) in ['list', 'tuple'] else [mariadb_allowed_hosts_raw] }}
+
+- name: Enforce restricted MariaDB hosts
+  assert:
+    that:
+      - '%' not in mariadb_allowed_hosts_effective
+    fail_msg: "mariadb_allowed_hosts cannot include % by default. Provide explicit host entries."
+
 - name: Install MariaDB packages
+  become: true
   apt:
     name:
       - mariadb-server
@@ -7,26 +23,76 @@
       - python3-pymysql
     state: present
     update_cache: yes
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Deploy custom MariaDB configuration
+  become: true
+  copy:
+    dest: /etc/mysql/mariadb.conf.d/99-custom.cnf
+    mode: "0644"
+    content: |
+      [mysqld]
+      bind-address = {{ service_ip }}
+      max_connections = 200
+  notify: Restart MariaDB
 
 - name: Copy systemd unit file
+  become: true
   copy:
     src: "{{ runtime_config_path }}"
     dest: "/etc/systemd/system/{{ service_id }}.service"
     mode: '0644'
+  notify: Restart MariaDB
 
 - name: Reload systemd
+  become: true
   systemd:
     daemon_reload: yes
 
-- name: Enable and start service
+- name: Enable service
+  become: true
   systemd:
     name: "{{ service_id }}"
     enabled: yes
+
+- name: Start service
+  become: true
+  systemd:
+    name: "{{ service_id }}"
     state: started
 
-- name: Run post-install setup
-  shell: |
-    mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '{{ mariadb_root_password }}';"
-    mysql -u root -p'{{ mariadb_root_password }}' -e "CREATE DATABASE IF NOT EXISTS {{ mariadb_database }};"
-    mysql -u root -p'{{ mariadb_root_password }}' -e "CREATE USER IF NOT EXISTS '{{ mariadb_user }}'@'%' IDENTIFIED BY '{{ mariadb_user_password }}';"
-    mysql -u root -p'{{ mariadb_root_password }}' -e "GRANT ALL PRIVILEGES ON {{ mariadb_database }}.* TO '{{ mariadb_user }}'@'%';"
+- name: Secure MariaDB root account
+  become: true
+  community.mysql.mysql_user:
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    name: root
+    host: localhost
+    password: "{{ mariadb_root_password }}"
+    check_implicit_admin: true
+    state: present
+  no_log: true
+
+- name: Ensure MariaDB database exists
+  become: true
+  community.mysql.mysql_db:
+    name: "{{ mariadb_database }}"
+    state: present
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    login_user: root
+    login_password: "{{ mariadb_root_password }}"
+  no_log: true
+
+- name: Ensure MariaDB user exists with limited hosts
+  become: true
+  community.mysql.mysql_user:
+    name: "{{ mariadb_user }}"
+    password: "{{ mariadb_user_password }}"
+    host: "{{ item }}"
+    priv: "{{ mariadb_database }}.*:ALL"
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    login_user: root
+    login_password: "{{ mariadb_root_password }}"
+    state: present
+  loop: "{{ mariadb_allowed_hosts_effective }}"
+  no_log: true

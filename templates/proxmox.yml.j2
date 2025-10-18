@@ -1,4 +1,5 @@
 ---
+container_ip: "{{ mariadb_ip }}"
 container:
   vmid: "{{ mariadb_container_id }}"
   hostname: "{{ mariadb_hostname }}"
@@ -11,25 +12,22 @@ container:
     net0: "name=eth0,bridge=vmbr0,ip={{ mariadb_ip }}/24,gw={{ gateway }}"
   onboot: yes
   unprivileged: yes
+  features: "nesting=1,keyctl=1"
 
 setup:
   packages:
     - mariadb-server
     - mariadb-client
     - python3-pymysql
-  
+
   config:
     - path: /etc/mysql/mariadb.conf.d/99-custom.cnf
       content: |
         [mysqld]
-        bind-address = 0.0.0.0
+        bind-address = {{ mariadb_bind_address | default(container_ip) }}
         max_connections = 200
-  
-  commands:
-    - systemctl enable mariadb
-    - systemctl start mariadb
-    - mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '{{ mariadb_root_password }}';"
-    - mysql -u root -p'{{ mariadb_root_password }}' -e "CREATE DATABASE IF NOT EXISTS {{ mariadb_database }};"
-    - mysql -u root -p'{{ mariadb_root_password }}' -e "CREATE USER IF NOT EXISTS '{{ mariadb_user }}'@'%' IDENTIFIED BY '{{ mariadb_user_password }}';"
-    - mysql -u root -p'{{ mariadb_root_password }}' -e "GRANT ALL PRIVILEGES ON {{ mariadb_database }}.* TO '{{ mariadb_user }}'@'%';"
-    - mysql -u root -p'{{ mariadb_root_password }}' -e "FLUSH PRIVILEGES;"
+
+  services:
+    - name: mariadb
+      enabled: true
+      state: started

@@ -40,5 +40,34 @@ properties:
         type: string
       retries:
         type: integer
+  secrets:
+    type: object
+    properties:
+      env:
+        type: array
+        items:
+          type: object
+          required: [name, value]
+          properties:
+            name:
+              type: string
+            value:
+              type: string
+      files:
+        type: array
+        items:
+          type: object
+          required: [name, value]
+          properties:
+            name:
+              type: string
+            value:
+              type: string
+            content:
+              type: string
+            target:
+              type: string
+            mode:
+              type: string
   runtime_templates:
     type: object

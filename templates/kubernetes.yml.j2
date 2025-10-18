@@ -1,19 +1,36 @@
+{% set svc_name = service_id | default('mariadb') %}
+{% set namespace = k8s_namespace | default('default') %}
+{% set default_secret_env = [
+  {'name': 'MYSQL_ROOT_PASSWORD', 'value': mariadb_root_password},
+  {'name': 'MYSQL_PASSWORD', 'value': mariadb_user_password}
+] %}
+{% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else default_secret_env %}
+{% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
+{% set secret_name = svc_name + '-secrets' %}
+{% set health_cmd = health.cmd | default(['mysqladmin', 'ping', '-h', 'localhost']) %}
+{% set health_interval_seconds = (health.interval | default('10s')) | regex_replace('s$', '') | int %}
+{% set health_timeout_seconds = (health.timeout | default('5s')) | regex_replace('s$', '') | int %}
+{% set health_retries = health.retries | default(3) %}
 ---
 apiVersion: v1
 kind: Secret
 metadata:
-  name: mariadb-secrets
-  namespace: {{ k8s_namespace | default('default') }}
+  name: {{ secret_name }}
+  namespace: {{ namespace }}
 type: Opaque
 stringData:
-  root-password: {{ mariadb_root_password }}
-  user-password: {{ mariadb_user_password }}
+{% for item in secret_env %}
+  {{ item.name }}: {{ item.value | to_json }}
+{% endfor %}
+{% for secret in file_secrets %}
+  {{ secret.name }}: {{ (secret.value | default(secret.content) | default('', true)) | to_json }}
+{% endfor %}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: mariadb-data
-  namespace: {{ k8s_namespace | default('default') }}
+  name: {{ svc_name }}-data
+  namespace: {{ namespace }}
 spec:
   accessModes:
     - ReadWriteOnce
@@ -24,72 +41,98 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mariadb
-  namespace: {{ k8s_namespace | default('default') }}
+  name: {{ svc_name }}
+  namespace: {{ namespace }}
 spec:
-  replicas: 1
+  replicas: {{ mariadb_replicas | default(1) }}
   selector:
     matchLabels:
-      app: mariadb
+      app: {{ svc_name }}
   template:
     metadata:
       labels:
-        app: mariadb
+        app: {{ svc_name }}
     spec:
       containers:
-      - name: mariadb
-        image: mariadb:{{ version }}
-        env:
-        - name: MYSQL_ROOT_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: mariadb-secrets
-              key: root-password
-        - name: MYSQL_DATABASE
-          value: {{ mariadb_database }}
-        - name: MYSQL_USER
-          value: {{ mariadb_user }}
-        - name: MYSQL_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: mariadb-secrets
-              key: user-password
-        ports:
-        - containerPort: 3306
-        volumeMounts:
-        - name: data
-          mountPath: /var/lib/mysql
-        livenessProbe:
-          exec:
-            command:
-            - mysqladmin
-            - ping
-            - -h
-            - localhost
-          initialDelaySeconds: 30
-          periodSeconds: {{ health.interval | default('10s') | regex_replace('s$', '') | int }}
-          timeoutSeconds: {{ health.timeout | default('5s') | regex_replace('s$', '') | int }}
-        resources:
-          requests:
-            memory: {{ mariadb_memory }}Mi
-            cpu: {{ mariadb_cores * 1000 }}m
-          limits:
-            memory: {{ mariadb_memory }}Mi
-            cpu: {{ mariadb_cores * 1000 }}m
+        - name: {{ svc_name }}
+          image: mariadb:{{ version }}
+          env:
+{% for item in secret_env %}
+            - name: {{ item.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ secret_name }}
+                  key: {{ item.name }}
+{% endfor %}
+            - name: MYSQL_DATABASE
+              value: {{ mariadb_database }}
+            - name: MYSQL_USER
+              value: {{ mariadb_user }}
+          ports:
+            - containerPort: 3306
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+{% if file_secrets %}
+{% for secret in file_secrets %}
+            - name: secret-files
+              mountPath: {{ secret.target | default('/run/secrets/' ~ secret.name) }}
+              subPath: {{ secret.name }}
+              readOnly: true
+{% endfor %}
+{% endif %}
+          livenessProbe:
+            exec:
+              command:
+{% for arg in health_cmd %}
+                - {{ arg }}
+{% endfor %}
+            initialDelaySeconds: 30
+            periodSeconds: {{ health_interval_seconds }}
+            timeoutSeconds: {{ health_timeout_seconds }}
+            failureThreshold: {{ health_retries }}
+          readinessProbe:
+            exec:
+              command:
+{% for arg in health_cmd %}
+                - {{ arg }}
+{% endfor %}
+            initialDelaySeconds: 10
+            periodSeconds: {{ health_interval_seconds }}
+            timeoutSeconds: {{ health_timeout_seconds }}
+            failureThreshold: {{ health_retries }}
+            successThreshold: 1
+          resources:
+            requests:
+              memory: {{ mariadb_memory }}Mi
+              cpu: {{ mariadb_cores * 1000 }}m
+            limits:
+              memory: {{ mariadb_memory }}Mi
+              cpu: {{ mariadb_cores * 1000 }}m
       volumes:
-      - name: data
-        persistentVolumeClaim:
-          claimName: mariadb-data
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ svc_name }}-data
+{% if file_secrets %}
+        - name: secret-files
+          secret:
+            secretName: {{ secret_name }}
+            items:
+{% for secret in file_secrets %}
+              - key: {{ secret.name }}
+                path: {{ secret.name }}
+{% endfor %}
+{% endif %}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: mariadb
-  namespace: {{ k8s_namespace | default('default') }}
+  name: {{ svc_name }}
+  namespace: {{ namespace }}
 spec:
   selector:
-    app: mariadb
+    app: {{ svc_name }}
   ports:
-  - port: 3306
-    targetPort: 3306
+    - port: 3306
+      targetPort: 3306
   type: ClusterIP

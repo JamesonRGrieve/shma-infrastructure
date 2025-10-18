@@ -1,16 +1,87 @@
 ---
+- name: Determine quadlet scope
+  set_fact:
+    quadlet_effective_scope: "{{ quadlet_scope | default('system') }}"
+    quadlet_unit_name: "{{ service_id | default(mariadb_hostname) }}"
+
+- name: Resolve quadlet paths
+  set_fact:
+    quadlet_base_dir: "{{ (quadlet_effective_scope == 'user') | ternary((ansible_env.HOME | default(lookup('env', 'HOME'))) + '/.config/containers/systemd', '/etc/containers/systemd') }}"
+    quadlet_env_path: "{{ ((quadlet_effective_scope == 'user') | ternary((ansible_env.HOME | default(lookup('env', 'HOME'))) + '/.config/containers/systemd', '/etc/containers/systemd')) + '/' + (mariadb_hostname) + '.env' }}"
+    quadlet_secret_dir: "{{ ((quadlet_effective_scope == 'user') | ternary((ansible_env.HOME | default(lookup('env', 'HOME'))) + '/.config/containers/systemd/secrets', '/etc/containers/systemd/secrets')) }}"
+
+- name: Resolve Quadlet secrets
+  set_fact:
+    quadlet_secret_env: {{ (secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else []) }}
+    quadlet_secret_files: {{ secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] }}
+
+- name: Apply default secret environment values when unspecified
+  set_fact:
+    quadlet_secret_env: {{ quadlet_secret_env + [
+      {'name': 'MYSQL_ROOT_PASSWORD', 'value': mariadb_root_password},
+      {'name': 'MYSQL_PASSWORD', 'value': mariadb_user_password}
+    ] if quadlet_secret_env | length == 0 else quadlet_secret_env }}
+
+- name: Deduplicate quadlet secret environment variables
+  set_fact:
+    quadlet_secret_env: >-
+      {{ quadlet_secret_env | reverse | unique(attribute='name') | reverse }}
+
+- name: Ensure quadlet directory exists
+  file:
+    path: "{{ quadlet_base_dir }}"
+    state: directory
+    mode: '0755'
+  become: {{ (quadlet_effective_scope == 'system') | bool }}
+
+- name: Ensure quadlet secret directory exists
+  file:
+    path: "{{ quadlet_secret_dir }}"
+    state: directory
+    mode: '0700'
+  when: quadlet_secret_files | length > 0
+  become: {{ (quadlet_effective_scope == 'system') | bool }}
+
+- name: Write Quadlet environment file
+  copy:
+    dest: "{{ quadlet_env_path }}"
+    mode: '0600'
+    content: |-
+      {% for item in quadlet_secret_env %}
+      {{ item.name }}={{ item.value }}
+      {% endfor %}
+  no_log: true
+  become: {{ (quadlet_effective_scope == 'system') | bool }}
+
+- name: Write Quadlet secret files
+  copy:
+    dest: "{{ quadlet_secret_dir }}/{{ item.name }}"
+    mode: "{{ item.mode | default('0400') }}"
+    content: "{{ item.value | default(item.content) }}"
+  loop: "{{ quadlet_secret_files }}"
+  when: quadlet_secret_files | length > 0
+  no_log: true
+  become: {{ (quadlet_effective_scope == 'system') | bool }}
+
 - name: Copy Quadlet container file
   copy:
     src: "{{ runtime_config_path }}"
-    dest: "/etc/containers/systemd/{{ service_id }}.container"
+    dest: "{{ quadlet_base_dir }}/{{ quadlet_unit_name }}.container"
     mode: '0644'
+  become: {{ (quadlet_effective_scope == 'system') | bool }}
 
 - name: Reload systemd daemon
   systemd:
     daemon_reload: yes
+    scope: "{{ quadlet_effective_scope }}"
 
 - name: Enable and start container
   systemd:
-    name: "{{ service_id }}"
+    name: "{{ quadlet_unit_name }}"
     enabled: yes
     state: started
+    scope: "{{ quadlet_effective_scope }}"
+
+- name: Set service IP for health checks
+  set_fact:
+    service_ip: "{{ mariadb_ip }}"
