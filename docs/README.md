@@ -97,7 +97,7 @@ secrets:
       value: "{{ sample_service_tls_cert }}"
 ```
 
-> **Note:** Always declare host mounts with `service_volumes` (plural). The legacy `service_volume` key is deprecated and retained only for backward compatibility with older inventories.
+> **Note:** Always declare host mounts with `service_volumes` (plural). The legacy `service_volume` key has been removed; migrate older inventories to the plural form before running validation.
 
 Downstream applications consume these exports by resolving them through a dependency registry shared between repositories. Provide the registry as a list of known dependencies either inline (`dependency_registry`) or via `dependency_registry_file`:
 

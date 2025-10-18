@@ -16,6 +16,24 @@
       - runtime_templates is defined
     fail_msg: "Service {{ service_id | default('unknown') }} is missing required contract fields"
 
+- name: Detect legacy service_volume usage
+  when: service_volume is defined
+  block:
+    - name: Warn about removed service_volume key
+      debug:
+        msg: >-
+          Service {{ service_id | default('unknown') }} still defines the legacy
+          service_volume key. Support for service_volume was removed; rename the
+          definition to service_volumes (array) before continuing.
+        warn: true
+
+    - name: Fail when legacy service_volume is present
+      fail:
+        msg: >-
+          Service {{ service_id | default('unknown') }} uses the removed
+          service_volume key. Rename it to service_volumes (array) and re-run
+          validation.
+
 - name: Initialize dependency registry sources
   set_fact:
     dependency_registry_sources: []
