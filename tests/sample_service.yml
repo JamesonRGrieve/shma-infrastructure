@@ -1,0 +1,58 @@
+service_id: mariadb
+version: "10.11"
+
+runtime_templates:
+  proxmox: templates/proxmox.yml.j2
+  docker: templates/docker.yml.j2
+  podman: templates/podman.yml.j2
+  kubernetes: templates/kubernetes.yml.j2
+  baremetal: templates/baremetal.yml.j2
+
+health:
+  cmd:
+    - mysqladmin
+    - ping
+    - -h
+    - 127.0.0.1
+    - -P
+    - "3306"
+  interval: 10s
+  timeout: 5s
+  retries: 3
+
+mariadb_hostname: mariadb-sample
+mariadb_container_id: 200
+mariadb_ip: 192.0.2.50
+mariadb_storage_gb: 10
+mariadb_memory: 512
+mariadb_cores: 1
+mariadb_database: sampledb
+mariadb_user: sample
+mariadb_root_password: sample-root
+mariadb_user_password: sample-user
+mariadb_allowed_hosts:
+  - 192.0.2.10
+mariadb_bind_address: 192.0.2.50
+
+proxmox_template: local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst
+gateway: 192.0.2.1
+proxmox_node: pve
+proxmox_api_user: test@pam
+proxmox_api_password: password
+proxmox_api_host: proxmox.local
+
+k8s_namespace: sample
+mariadb_replicas: 1
+quadlet_scope: system
+
+secrets:
+  env:
+    - name: MYSQL_ROOT_PASSWORD
+      value: sample-root
+    - name: MYSQL_PASSWORD
+      value: sample-user
+  files:
+    - name: ca-cert
+      value: "-----BEGIN CERTIFICATE-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA\n-----END CERTIFICATE-----"
+      target: /etc/mysql/certs/ca.pem
+      mode: '0400'

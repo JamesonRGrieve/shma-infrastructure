@@ -3,10 +3,12 @@
   include_tasks: "{{ runtime }}.yml"
 
 - name: Health check after deployment
-  command: "{{ health.cmd | join(' ') }}"
+  command: "{{ health.cmd[0] if health.cmd is defined else 'true' }}"
+  args:
+    argv: {{ health.cmd }}
   delegate_to: "{{ service_ip | default(ansible_default_ipv4.address) }}"
-  retries: "{{ health.retries | default(3) }}"
-  delay: "{{ health.interval | default('10s') | regex_replace('s$', '') | int }}"
+  retries: {{ health.retries | default(3) }}
+  delay: {{ health.interval | default('10s') | regex_replace('s$', '') | int }}
   register: health_result
   until: health_result.rc == 0
   when: health is defined

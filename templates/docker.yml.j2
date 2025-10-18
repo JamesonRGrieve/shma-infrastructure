@@ -1,3 +1,11 @@
+{% set default_secret_env = [
+  {'name': 'MYSQL_ROOT_PASSWORD', 'value': mariadb_root_password},
+  {'name': 'MYSQL_PASSWORD', 'value': mariadb_user_password}
+] %}
+{% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else default_secret_env %}
+{% set secret_env_names = secret_env | map(attribute='name') | list %}
+{% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
+{% set env_file_name = mariadb_hostname + '.env' %}
 version: '3.8'
 
 services:
@@ -5,11 +13,21 @@ services:
     image: mariadb:{{ version }}
     container_name: {{ mariadb_hostname }}
     restart: unless-stopped
+{% if secret_env %}
+    env_file:
+      - "./{{ env_file_name }}"
+{% endif %}
+{% set inline_env = {
+  'MYSQL_DATABASE': mariadb_database,
+  'MYSQL_USER': mariadb_user
+} %}
+{% set filtered_inline_env = inline_env.items() | rejectattr('0', 'in', secret_env_names) | list %}
+{% if filtered_inline_env %}
     environment:
-      MYSQL_ROOT_PASSWORD: {{ mariadb_root_password }}
-      MYSQL_DATABASE: {{ mariadb_database }}
-      MYSQL_USER: {{ mariadb_user }}
-      MYSQL_PASSWORD: {{ mariadb_user_password }}
+{% for key, value in filtered_inline_env %}
+      {{ key }}: {{ value }}
+{% endfor %}
+{% endif %}
     volumes:
       - mariadb-data:/var/lib/mysql
     ports:
@@ -17,14 +35,30 @@ services:
     networks:
       - app-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: {{ health.cmd | default(['mysqladmin', 'ping', '-h', 'localhost']) | to_json }}
       interval: {{ health.interval | default('10s') }}
       timeout: {{ health.timeout | default('5s') }}
       retries: {{ health.retries | default(3) }}
+{% if file_secrets %}
+    secrets:
+{% for secret in file_secrets %}
+      - source: {{ secret.name }}
+        target: {{ secret.target | default(secret.name) }}
+        mode: {{ secret.mode | default('0400') }}
+{% endfor %}
+{% endif %}
 
 volumes:
   mariadb-data:
     driver: local
+{% if file_secrets %}
+
+secrets:
+{% for secret in file_secrets %}
+  {{ secret.name }}:
+    file: "./secrets/{{ secret.name }}"
+{% endfor %}
+{% endif %}
 
 networks:
   app-network:

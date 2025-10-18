@@ -1,0 +1,10 @@
+---
+- name: Render sample service runtime
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - sample_service.yml
+  tasks:
+    - name: Render runtime configuration
+      include_role:
+        name: roles/common/render_runtime

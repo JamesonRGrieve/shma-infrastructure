@@ -1,484 +1,97 @@
 # Docker Compose Deployment Guide
 
-Deploy services using Docker Compose for simple, portable containerized applications.
+Deploy services using Docker Compose with secret-aware environment files and Compose v2 tooling.
+
+## What's new
+
+- Secrets defined in the service contract populate a dedicated `./<hostname>.env` file; sensitive values no longer appear inline.
+- File-based secrets render into `secrets/` and are attached via Compose `secrets` blocks.
+- `community.docker.docker_compose_v2` drives deployments to align with the modern Docker CLI plugin.
+- Health probes come directly from `health.cmd` ensuring parity with other runtimes.
 
 ## Prerequisites
 
 ```bash
-# Install Docker
-curl -fsSL https://get.docker.com | sh
-
-# Install Docker Compose plugin
-apt install docker-compose-plugin
-
-# Install Ansible Docker collection
+sudo apt install docker.io docker-compose-plugin
 ansible-galaxy collection install community.docker
-pip3 install docker docker-compose
 ```
 
-## Configuration
-
-### Environment Variables
+Verify the plugin version:
 
 ```bash
-# .env file
-RUNTIME=compose
-
-# Service configuration
-MARIADB_ROOT_PASSWORD=secure_password
-MARIADB_USER=app
-MARIADB_USER_PASSWORD=user_password
-MARIADB_DATABASE=appdb
-MARIADB_VERSION=10.11
-MARIADB_IP=192.168.0.200
+docker compose version
 ```
 
-### Docker Network
+## Template highlights
 
-```bash
-# Create shared network for services
-docker network create app-network
-```
-
-## Deployment
-
-### Basic Deployment
-
-```bash
-ansible-playbook playbooks/deploy-mariadb.yml -e runtime=compose
-```
-
-### Custom Compose File Location
-
-```bash
-ansible-playbook playbooks/deploy-mariadb.yml \
-  -e runtime=compose \
-  -e compose_project_path=/opt/services/mariadb
-```
-
-### Deploy Multiple Services
-
-```bash
-# Deploy full stack
-ansible-playbook playbooks/deploy-stack.yml -e runtime=compose
-```
-
-## Compose Template Structure
+`templates/docker.yml.j2` now outputs:
 
 ```yaml
 version: '3.8'
 
 services:
-  {{ service_id }}:
-    image: {{ image }}:{{ version }}
-    container_name: {{ hostname }}
-    restart: unless-stopped
-    
-    environment:
-      ENV_VAR: {{ value }}
-    
-    volumes:
-      - {{ service_id }}-data:{{ storage_path }}
-    
-    ports:
-      - "{{ host_ip }}:{{ host_port }}:{{ container_port }}"
-    
-    networks:
-      - app-network
-    
-    healthcheck:
-      test: {{ health.cmd }}
-      interval: {{ health.interval }}
-      timeout: {{ health.timeout }}
-      retries: {{ health.retries }}
-
-volumes:
-  {{ service_id }}-data:
-    driver: local
-
-networks:
-  app-network:
-    external: true
-```
-
-## Advanced Configuration
-
-### Volume Management
-
-**Named volumes**:
-```yaml
-volumes:
-  mariadb-data:
-    driver: local
-```
-
-**Bind mounts**:
-```yaml
-volumes:
-  - /opt/data/mariadb:/var/lib/mysql
-```
-
-**NFS volumes**:
-```yaml
-volumes:
-  mariadb-data:
-    driver: local
-    driver_opts:
-      type: nfs
-      o: addr=nas.local,rw
-      device: ":/export/mariadb"
-```
-
-### Resource Limits
-
-```yaml
-services:
-  mariadb:
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 2G
-        reservations:
-          cpus: '1.0'
-          memory: 1G
-```
-
-### Custom Networks
-
-```yaml
-networks:
-  frontend:
-    driver: bridge
-  backend:
-    driver: bridge
-    internal: true  # No external access
-```
-
-### Environment Files
-
-```yaml
-services:
-  mariadb:
-    env_file:
-      - .env
-      - .env.production
-```
-
-## Service Management
-
-### Start/Stop Services
-
-```bash
-# Start
-docker-compose -f /path/to/compose.yml up -d
-
-# Stop
-docker-compose -f /path/to/compose.yml stop
-
-# Restart
-docker-compose -f /path/to/compose.yml restart
-
-# Remove
-docker-compose -f /path/to/compose.yml down
-```
-
-### View Logs
-
-```bash
-# All services
-docker-compose logs -f
-
-# Specific service
-docker-compose logs -f mariadb
-
-# Last 100 lines
-docker-compose logs --tail=100 mariadb
-```
-
-### Execute Commands
-
-```bash
-# Interactive shell
-docker-compose exec mariadb bash
-
-# Run command
-docker-compose exec mariadb mysqladmin ping
-```
-
-## Troubleshooting
-
-### Container Won't Start
-
-```bash
-# Check logs
-docker-compose logs mariadb
-
-# Check events
-docker events --filter container=mariadb
-
-# Inspect container
-docker inspect mariadb
-```
-
-### Port Conflicts
-
-```bash
-# Check what's using the port
-lsof -i :3306
-netstat -tulpn | grep 3306
-
-# Change port in compose file
-ports:
-  - "3307:3306"  # Use different host port
-```
-
-### Volume Permission Issues
-
-```bash
-# Fix ownership inside container
-docker-compose exec mariadb chown -R mysql:mysql /var/lib/mysql
-
-# Or use user mapping
-services:
-  mariadb:
-    user: "1000:1000"
-```
-
-### Network Issues
-
-```bash
-# Recreate network
-docker network rm app-network
-docker network create app-network
-
-# Check network connectivity
-docker-compose exec mariadb ping other-service
-```
-
-## Backup and Restore
-
-### Database Backup
-
-```bash
-# MySQL/MariaDB dump
-docker-compose exec mariadb mysqldump \
-  -u root -p"${MARIADB_ROOT_PASSWORD}" \
-  --all-databases > backup.sql
-
-# Restore
-docker-compose exec -T mariadb mysql \
-  -u root -p"${MARIADB_ROOT_PASSWORD}" \
-  < backup.sql
-```
-
-### Volume Backup
-
-```bash
-# Stop service
-docker-compose stop mariadb
-
-# Backup volume
-docker run --rm \
-  -v mariadb_mariadb-data:/source \
-  -v /backup:/backup \
-  alpine tar czf /backup/mariadb-$(date +%Y%m%d).tar.gz -C /source .
-
-# Restore volume
-docker run --rm \
-  -v mariadb_mariadb-data:/target \
-  -v /backup:/backup \
-  alpine tar xzf /backup/mariadb-20241016.tar.gz -C /target
-
-# Start service
-docker-compose start mariadb
-```
-
-## Security Best Practices
-
-### Secrets Management
-
-```yaml
-# Use Docker secrets (Swarm mode)
-services:
-  mariadb:
-    secrets:
-      - db_root_password
-
-secrets:
-  db_root_password:
-    external: true
-```
-
-### Read-Only Root Filesystem
-
-```yaml
-services:
-  mariadb:
-    read_only: true
-    tmpfs:
-      - /tmp
-      - /run
-```
-
-### Drop Capabilities
-
-```yaml
-services:
-  mariadb:
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - DAC_OVERRIDE
-      - SETGID
-      - SETUID
-```
-
-### Network Isolation
-
-```yaml
-# Backend services not exposed to host
-services:
-  mariadb:
-    networks:
-      - backend  # No ports published
-
-  app:
-    ports:
-      - "80:80"  # Only app exposed
-    networks:
-      - frontend
-      - backend
-```
-
-## Monitoring
-
-### Health Checks
-
-```yaml
-healthcheck:
-  test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-  interval: 30s
-  timeout: 10s
-  retries: 3
-  start_period: 40s
-```
-
-### Prometheus Integration
-
-```yaml
-services:
-  mariadb:
-    labels:
-      - "prometheus.scrape=true"
-      - "prometheus.port=9104"
-  
-  mysql-exporter:
-    image: prom/mysqld-exporter
-    environment:
-      DATA_SOURCE_NAME: "exporter:password@(mariadb:3306)/"
-    ports:
-      - "9104:9104"
-```
-
-## Performance Tuning
-
-### Logging Drivers
-
-```yaml
-services:
-  mariadb:
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-```
-
-### Build Cache
-
-```bash
-# Use BuildKit for faster builds
-DOCKER_BUILDKIT=1 docker-compose build
-
-# Enable BuildKit permanently
-echo '{"features": {"buildkit": true}}' > /etc/docker/daemon.json
-systemctl restart docker
-```
-
-## Examples
-
-### WordPress + MariaDB Stack
-
-```yaml
-version: '3.8'
-
-services:
-  wordpress:
-    image: wordpress:latest
-    depends_on:
-      mariadb:
-        condition: service_healthy
-    environment:
-      WORDPRESS_DB_HOST: mariadb
-      WORDPRESS_DB_USER: wordpress
-      WORDPRESS_DB_PASSWORD: ${WP_DB_PASSWORD}
-      WORDPRESS_DB_NAME: wordpress
-    ports:
-      - "80:80"
-    volumes:
-      - wordpress-data:/var/www/html
-    networks:
-      - app-network
-
   mariadb:
     image: mariadb:10.11
+    container_name: mariadb-sample
+    restart: unless-stopped
+    env_file:
+      - ./mariadb-sample.env
     environment:
-      MYSQL_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
-      MYSQL_DATABASE: wordpress
-      MYSQL_USER: wordpress
-      MYSQL_PASSWORD: ${WP_DB_PASSWORD}
+      MYSQL_DATABASE: sampledb
+      MYSQL_USER: sample
     volumes:
       - mariadb-data:/var/lib/mysql
+    ports:
+      - "192.0.2.50:3306:3306"
     networks:
       - app-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["mysqladmin", "ping", "-h", "127.0.0.1", "-P", "3306"]
       interval: 10s
       timeout: 5s
       retries: 3
+    secrets:
+      - source: ca-cert
+        target: /etc/mysql/certs/ca.pem
+        mode: '0400'
 
 volumes:
-  wordpress-data:
   mariadb-data:
+    driver: local
+
+secrets:
+  ca-cert:
+    file: ./secrets/ca-cert
 
 networks:
   app-network:
     driver: bridge
 ```
 
-## Migration
+## Contract inputs
 
-### From Docker Run to Compose
+- `secrets.env` entries feed the env file.
+- `secrets.files` entries create files in `secrets/<name>` and populate the Compose `secrets` map.
+- `mariadb_ip` controls host binding; avoid `0.0.0.0` unless firewalled.
 
-```bash
-# Export running container config
-docker inspect mariadb > container.json
+## Validating the render
 
-# Convert to compose format (manual)
-# Or use tools like composerize
-```
-
-### To Kubernetes
+After running `ansible-playbook tests/render.yml -e runtime=docker`, verify the manifest:
 
 ```bash
-# Use kompose to convert
-kompose convert -f docker-compose.yml
+docker compose -f /tmp/ansible-runtime/mariadb/docker.yml config
 ```
 
-## Next Steps
+## Deployment with Ansible
 
-- [Podman Quadlet Deployment](deployment-quadlet.md)
-- [Kubernetes Deployment](deployment-k8s.md)
-- [Creating Services](creating-services.md)
+`roles/common/apply_runtime/tasks/docker.yml`:
+
+1. Builds the env file and optional `secrets/` directory under the render output.
+2. Invokes `community.docker.docker_compose_v2` with `pull: always` to keep images fresh.
+3. Sets `service_ip` for the unified health gate.
+
+Use the shared health command to run a post-deploy verification:
+
+```bash
+ansible-playbook playbooks/deploy-mariadb.yml -e runtime=docker -e "health.cmd=['mysqladmin','ping','-h','192.0.2.50']"
+```

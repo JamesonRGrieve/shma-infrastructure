@@ -1,3 +1,17 @@
+{% set default_secret_env = [
+  {'name': 'MYSQL_ROOT_PASSWORD', 'value': mariadb_root_password},
+  {'name': 'MYSQL_PASSWORD', 'value': mariadb_user_password}
+] %}
+{% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else default_secret_env %}
+{% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
+{% set quadlet_scope_value = quadlet_scope | default('system') %}
+{% if quadlet_scope_value == 'user' %}
+{% set quadlet_base_dir = '%h/.config/containers/systemd' %}
+{% else %}
+{% set quadlet_base_dir = '/etc/containers/systemd' %}
+{% endif %}
+{% set env_file_path = quadlet_base_dir ~ '/' ~ mariadb_hostname ~ '.env' %}
+{% set secret_dir = quadlet_base_dir ~ '/secrets' %}
 [Unit]
 Description=MariaDB Database
 After=network-online.target
@@ -7,16 +21,17 @@ Wants=network-online.target
 Image=docker.io/library/mariadb:{{ version }}
 ContainerName={{ mariadb_hostname }}
 AutoUpdate=registry
-
-Environment=MYSQL_ROOT_PASSWORD={{ mariadb_root_password }}
 Environment=MYSQL_DATABASE={{ mariadb_database }}
 Environment=MYSQL_USER={{ mariadb_user }}
-Environment=MYSQL_PASSWORD={{ mariadb_user_password }}
-
+{% if secret_env %}
+EnvironmentFile={{ env_file_path }}
+{% endif %}
 Volume=mariadb-data.volume:/var/lib/mysql:Z
 PublishPort={{ mariadb_ip }}:3306:3306
-
-HealthCmd=mysqladmin ping -h localhost
+{% for secret in file_secrets %}
+Volume={{ secret_dir }}/{{ secret.name }}:{{ secret.target | default('/run/secrets/' ~ secret.name) }}:ro,Z
+{% endfor %}
+HealthCmd={{ (health.cmd | default(['mysqladmin', 'ping', '-h', 'localhost'])) | join(' ') }}
 HealthInterval={{ health.interval | default('10s') }}
 HealthTimeout={{ health.timeout | default('5s') }}
 HealthRetries={{ health.retries | default(3) }}

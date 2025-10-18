@@ -1,8 +1,55 @@
 ---
-- name: Deploy with Docker Compose
-  community.docker.docker_compose:
+- name: Resolve Docker secrets
+  set_fact:
+    compose_secret_env: {{ (secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else []) }}
+    compose_secret_files: {{ secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] }}
+
+- name: Apply default secret environment values when unspecified
+  set_fact:
+    compose_secret_env: {{ compose_secret_env + [
+      {'name': 'MYSQL_ROOT_PASSWORD', 'value': mariadb_root_password},
+      {'name': 'MYSQL_PASSWORD', 'value': mariadb_user_password}
+    ] if compose_secret_env | length == 0 else compose_secret_env }}
+
+- name: Deduplicate secret environment variables
+  set_fact:
+    compose_secret_env: >-
+      {{ compose_secret_env | reverse | unique(attribute='name') | reverse }}
+
+- name: Write Compose secret environment file
+  copy:
+    dest: "{{ runtime_output_dir }}/{{ mariadb_hostname }}.env"
+    mode: '0600'
+    content: |-
+      {% for item in compose_secret_env %}
+      {{ item.name }}={{ item.value }}
+      {% endfor %}
+  no_log: true
+
+- name: Ensure Compose secret directory exists
+  file:
+    path: "{{ runtime_output_dir }}/secrets"
+    state: directory
+    mode: '0700'
+  when: compose_secret_files | length > 0
+
+- name: Write Compose secret files
+  copy:
+    dest: "{{ runtime_output_dir }}/secrets/{{ item.name }}"
+    mode: "{{ item.mode | default('0400') }}"
+    content: "{{ item.value | default(item.content) }}"
+  loop: "{{ compose_secret_files }}"
+  when: compose_secret_files | length > 0
+  no_log: true
+
+- name: Deploy with Docker Compose v2
+  community.docker.docker_compose_v2:
     project_src: "{{ runtime_output_dir }}"
     files:
       - "{{ runtime_config_path | basename }}"
     state: present
-    pull: yes
+    pull: always
+
+- name: Set service IP for health checks
+  set_fact:
+    service_ip: "{{ mariadb_ip }}"
