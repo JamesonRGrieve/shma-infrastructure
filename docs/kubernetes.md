@@ -2,6 +2,13 @@
 
 Render Kubernetes manifests with Secret integration, readiness probes, hostPath-aware volumes, and resource requests derived from the shared contract.
 
+## Secret transport differences
+
+Kubernetes stores `secrets.env` and `secrets.files` as mounted files. When migrating from Docker or Podman, adjust workloads that
+expect environment variables to read the content from files (or populate a ConfigMap) and reference those volumes in the pod spec.
+Moving in the opposite direction requires translating file reads into environment variables or leaving the files in
+`secrets.files` so adapters render them locally before invoking the container runtime.
+
 ## Updates
 
 - `templates/kubernetes.yml.j2` emits separate Secrets for environment variables and file-backed material to keep RBAC scopes narrow.

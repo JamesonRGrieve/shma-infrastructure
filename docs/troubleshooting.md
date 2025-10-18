@@ -20,8 +20,9 @@ symptoms, commands to confirm the root cause, and remediation guidance.
 
 **Fix**
 - Add missing variables to the inventory or vault.
-- Set `secrets.shred_after_apply: false` temporarily to inspect rendered secret
-  files under `/tmp/ansible-runtime/<service>/`.
+- Set `secrets.shred_after_apply: false` temporarily (and document
+  `secrets.shred_waiver_reason`) to inspect rendered secret files under
+  `/tmp/ansible-runtime/<service>/`.
 
 ## Image pull errors
 

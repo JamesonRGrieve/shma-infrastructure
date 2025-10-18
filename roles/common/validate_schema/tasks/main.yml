@@ -96,6 +96,20 @@
     fail_msg: >-
       Dependency cycle detected: {{ dependency_cycle_paths | join('; ') }}
 
+- name: Enforce secret shredding waiver when disabled
+  assert:
+    that:
+      - secrets.shred_waiver_reason is defined
+      - (secrets.shred_waiver_reason | string | trim | length) > 0
+    fail_msg: >-
+      secrets.shred_after_apply cannot be set to false without documenting a
+      shred_waiver_reason that explains why persistent secret artifacts are
+      acceptable.
+  when:
+    - secrets is defined
+    - secrets.shred_after_apply is defined
+    - not (secrets.shred_after_apply | bool)
+
 - name: Validate secret environment values are not placeholders
   assert:
     that:

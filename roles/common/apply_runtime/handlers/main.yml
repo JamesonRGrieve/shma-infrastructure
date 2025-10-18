@@ -6,3 +6,15 @@
     name: "{{ service_unit_name | default(service_id) }}"
     state: restarted
   delegate_to: "{{ container_ip | default(service_ip | default(inventory_hostname)) }}"
+
+- name: Shred Docker runtime secrets
+  listen: docker runtime secret cleanup
+  ansible.builtin.include_tasks: secret_cleanup.yml
+  vars:
+    cleanup_secret_context: "{{ docker_secret_cleanup | default({}) }}"
+
+- name: Shred Podman runtime secrets
+  listen: podman runtime secret cleanup
+  ansible.builtin.include_tasks: secret_cleanup.yml
+  vars:
+    cleanup_secret_context: "{{ podman_secret_cleanup | default({}) }}"
