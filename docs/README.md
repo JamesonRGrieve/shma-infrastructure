@@ -49,6 +49,12 @@ runtime_templates:
   kubernetes: templates/kubernetes.yml.j2
   baremetal: templates/baremetal.yml.j2
 
+service_volumes:
+  - name: config
+    host_path: /srv/sample-service/config
+    host_path_type: DirectoryOrCreate
+    target: /etc/sample-service
+
 exports:
   env:
     - name: SAMPLE_SERVICE_URL
@@ -91,8 +97,12 @@ The registry keeps validation decoupled from the Ansible inventory while ensurin
 ## Additional Options
 
 - `quadlet_scope` – set to `system` (default) or `user` to control where Quadlet units are installed. When using `quadlet_scope: user`, make sure lingering is enabled for the target user or user services are explicitly started at boot.
+- `quadlet_auto_update` – defaults to `none` so Quadlet units do not pull image updates behind your back. Promote new digests intentionally or override per-service when a signed registry orchestrates rollouts.
+- `service_volumes.host_path` – bind-mounts host directories into containers across Compose, Quadlet, and Kubernetes. Pair with `host_path_type` (default `DirectoryOrCreate`) to choose the Kubernetes `hostPath` strategy.
 - `secrets.shred_after_apply` – defaults to `true` so rendered secret files and env files are shredded once adapters finish. Override with `false` only when persistent copies are required.
 - `hardening_enable_cockpit` – opt-in toggle that installs Cockpit, binds it to `hardening_cockpit_listen_address` (defaults to `127.0.0.1`), and optionally opens UFW 9090 to the addresses listed in `hardening_cockpit_allowed_sources`.
+- `hardening_cockpit_passwordless_sudo` – defaults to `false`. Enable only if Cockpit must issue privileged commands without prompting.
+- `hardening_enable_ipv6` – defaults to `true`, keeping dual-stack networks intact. Disable only when upstream networking prohibits IPv6 entirely.
 
 ## Continuous Integration
 

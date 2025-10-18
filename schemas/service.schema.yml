@@ -67,6 +67,10 @@ properties:
           type: string
         source:
           type: string
+        host_path:
+          type: string
+        host_path_type:
+          type: string
         target:
           type: string
         mode:

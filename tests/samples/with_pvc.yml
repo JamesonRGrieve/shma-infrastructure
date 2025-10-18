@@ -1,6 +1,6 @@
 service_id: pvc-service
 service_name: pvc-service
-service_image: docker.io/library/postgres:16.4
+service_image: docker.io/library/postgres@sha256:3d9bd3fddf463b0d1d457769278e41b1a086e404f96c823c689a2fe4f6b4c8d2
 service_env:
   - name: POSTGRES_DB
     value: app
@@ -47,6 +47,6 @@ kubernetes:
     size: 20Gi
     storageClassName: fast
 secrets:
-  shred_after_apply: false
+  shred_after_apply: true
   env: []
   files: []

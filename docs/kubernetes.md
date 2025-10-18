@@ -1,12 +1,14 @@
 # Kubernetes Deployment Guide
 
-Render Kubernetes manifests with Secret integration, readiness probes, and resource requests derived from the shared contract.
+Render Kubernetes manifests with Secret integration, readiness probes, hostPath-aware volumes, and resource requests derived from the shared contract.
 
 ## Updates
 
-- `templates/kubernetes.yml.j2` generates a single Secret that stores both environment variables and file-based secrets.
+- `templates/kubernetes.yml.j2` emits separate Secrets for environment variables and file-backed material to keep RBAC scopes narrow.
 - Containers mount secret files via a dedicated volume and consume environment variables via `valueFrom`.
 - Liveness and readiness probes originate from `health.cmd`, keeping checks consistent across runtimes.
+- Volume definitions now support `service_volumes.host_path`, which renders a `hostPath` mount when you want container filesystems to remain ephemeral while data persists on the node. Set `host_path_type` when you need a specific Kubernetes `hostPath` strategy.
+- Pin `service_image` values by digest; the rendered Deployment references that immutable identifier so rollouts remain deliberate.
 
 ## Prerequisites
 
@@ -21,8 +23,9 @@ ansible-galaxy collection install kubernetes.core
 
 `templates/kubernetes.yml.j2` emits:
 
-- `Secret` – named `<service_id>-secrets`, containing keys for every `secrets.env` entry plus file secrets.
-- `PersistentVolumeClaim` – sized from `service_storage_gb` or `service_storage_size`.
+- `Secret` – named `<service_id>-env`, containing keys for every `secrets.env` entry.
+- `Secret` – named `<service_id>-files`, storing the rendered secret files.
+- `PersistentVolumeClaim` – sized from `service_storage_gb` or `service_storage_size`. Skipped automatically when `service_volumes.host_path` is provided.
 - `Deployment` – references the Secret for env vars, mounts secret files, and configures probes/resources.
 - `Service` – exposes declared `service_ports` within the cluster.
 
@@ -42,13 +45,15 @@ spec:
             - name: SAMPLE_SERVICE_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: sample-service-secrets
+                  name: sample-service-env
                   key: SAMPLE_SERVICE_TOKEN
           volumeMounts:
             - name: secret-files
               mountPath: /etc/sample-service/certs/tls.crt
               subPath: tls-cert
               readOnly: true
+            - name: data
+              mountPath: /etc/sample-service
           livenessProbe:
             exec:
               command: ["/bin/sh", "-c", "exit 0"]
@@ -58,6 +63,15 @@ spec:
               command: ["/bin/sh", "-c", "exit 0"]
             initialDelaySeconds: 10
             periodSeconds: 10
+
+      volumes:
+        - name: secret-files
+          secret:
+            secretName: sample-service-files
+        - name: data
+          hostPath:
+            path: /srv/sample-service/config
+            type: DirectoryOrCreate
 ```
 
 ## Validation
@@ -72,5 +86,5 @@ kubectl apply --dry-run=client --validate=true -f /tmp/ansible-runtime/sample-se
 ## Deployment tips
 
 - Ensure the referenced namespace (`k8s_namespace`) exists before applying.
-- Consider separate Secrets when mounting large binary blobs; extend `secrets.files` as needed.
+- Use the generated `<service_id>-files` Secret for only the workloads that truly need those files; other deployments can skip mounting the `secret-files` volume entirely.
 - Adjust `service_replicas` to scale deployments and rely on the readiness probe before routing traffic.

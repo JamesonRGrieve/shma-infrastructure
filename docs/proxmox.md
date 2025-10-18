@@ -5,7 +5,7 @@ Deploy services as LXC containers on Proxmox VE with predictable networking and 
 ## Key changes
 
 - Templates emit `container_ip`, removing brittle IP parsing in Ansible tasks.
-- LXC features derive from the service contract. Nested container flags (`nesting=1,keyctl=1`) are only emitted when packages request Docker/Podman-style tooling.
+- LXC features derive exclusively from the service contract. Nested container flags such as `nesting=1,keyctl=1` appear only when you explicitly set `service_container.features`.
 - Ansible waits for SSH on `container_ip` (120 seconds) before running delegate tasks.
 - Package installation inside the container uses non-interactive APT and applies any rendered configuration or command hooks.
 
@@ -49,7 +49,7 @@ container:
     net0: "name=eth0,bridge=vmbr0,ip=192.0.2.50/24,gw=192.0.2.1"
   onboot: yes
   unprivileged: yes
-  # features emitted only when packages demand nested container support
+  # features emitted only when explicitly configured on the service contract
   features: "nesting=1,keyctl=1"
 
 setup:

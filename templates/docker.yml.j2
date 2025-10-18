@@ -71,7 +71,7 @@ services:
 {% if volumes %}
     volumes:
 {% for vol in volumes %}
-      - {{ vol.source | default(vol.name) }}:{{ vol.target }}{% if vol.mode is defined %}:{{ vol.mode }}{% endif %}
+      - {% if vol.host_path is defined %}{{ vol.host_path }}{% else %}{{ vol.source | default(vol.name) }}{% endif %}:{{ vol.target }}{% if vol.mode is defined %}:{{ vol.mode }}{% endif %}
 {% endfor %}
 {% endif %}
 {% set ports = svc.ports | default([]) %}
@@ -145,9 +145,12 @@ services:
 {% set ns = namespace(volumes=[]) %}
 {% for svc in services_list %}
   {% for vol in svc.volumes | default([]) %}
-    {% set volume_name = vol.source | default(vol.name) %}
-    {% if volume_name not in ns.volumes %}
-      {% set _ = ns.volumes.append(volume_name) %}
+    {% if vol.host_path is not defined %}
+      {% set volume_name = vol.source | default(vol.name) %}
+      {% set driver = vol.driver | default('local') %}
+      {% if ns.volumes | selectattr('name', 'equalto', volume_name) | list | length == 0 %}
+        {% set _ = ns.volumes.append({'name': volume_name, 'driver': driver}) %}
+      {% endif %}
     {% endif %}
   {% endfor %}
 {% endfor %}

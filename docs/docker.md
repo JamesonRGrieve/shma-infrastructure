@@ -8,6 +8,7 @@ Deploy services using Docker Compose with secret-aware environment files and Com
 - File-based secrets render into `secrets/` and are attached via Compose `secrets` blocks.
 - `community.docker.docker_compose_v2` drives deployments to align with the modern Docker CLI plugin.
 - Health probes come directly from `health.cmd` ensuring parity with other runtimes.
+- Host bind mounts are first-class: specify `service_volumes.host_path` to keep container filesystems disposable while state persists on the host.
 
 ## Prerequisites
 
@@ -31,7 +32,7 @@ version: '3.8'
 
 services:
   sample-service:
-    image: docker.io/library/nginx:1.27
+    image: docker.io/library/nginx@sha256:2ed85f18cb2c6b49e191bcb6bf12c0c07d63f3937a05d9f5234170d4f8df5c94
     container_name: sample-service
     restart: unless-stopped
     env_file:
@@ -40,7 +41,7 @@ services:
       APP_MODE: production
       APP_FEATURE_FLAG: "true"
     volumes:
-      - sample-service-config:/etc/sample-service
+      - /srv/sample-service/config:/etc/sample-service
     ports:
       - "192.0.2.50:8080:8080"
     networks:
@@ -54,11 +55,6 @@ services:
       - source: tls-cert
         target: /etc/sample-service/certs/tls.crt
         mode: '0400'
-
-volumes:
-  sample-service-config:
-    driver: local
-
 secrets:
   tls-cert:
     file: ./secrets/tls-cert
@@ -74,6 +70,8 @@ networks:
 - `secrets.files` entries create files in `secrets/<name>` and populate the Compose `secrets` map.
 - `secrets.shred_after_apply` defaults to `true`, removing rendered secrets after deployment unless you explicitly opt out.
 - `service_ports` control host bindings; publish only the ports you intend to expose.
+- `service_volumes.host_path` mounts host directories directly, which keeps containers ephemeral while the data persists on the host. Omit the key to fall back to managed named volumes.
+- `service_image` values should be pinned by digest; promote a new digest only after it passes your CI scanning gates.
 
 ## Validating the render
 
