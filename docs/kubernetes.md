@@ -7,6 +7,7 @@ Render Kubernetes manifests with Secret integration, readiness probes, hostPath-
 - `templates/kubernetes.yml.j2` emits separate Secrets for environment variables and file-backed material to keep RBAC scopes narrow.
 - Containers mount secret files via a dedicated volume and consume environment variables via `valueFrom`.
 - Liveness and readiness probes originate from `health.cmd`, keeping checks consistent across runtimes.
+- Changing `secrets.rotation_timestamp` adds a pod template annotation and environment variable so Deployments roll safely during secret rotation.
 - Volume definitions now support `service_volumes.host_path`, which renders a `hostPath` mount when you want container filesystems to remain ephemeral while data persists on the node. Set `host_path_type` when you need a specific Kubernetes `hostPath` strategy.
 - Pin `service_image` values by digest; the rendered Deployment references that immutable identifier so rollouts remain deliberate.
 
@@ -39,6 +40,9 @@ metadata:
   name: sample-service
 spec:
   template:
+    metadata:
+      annotations:
+        shma.dev/secrets-rotation: "2024-01-01T00:00:00Z"
     spec:
       containers:
         - name: sample-service
@@ -57,6 +61,8 @@ spec:
                 secretKeyRef:
                   name: sample-service-env
                   key: SAMPLE_SERVICE_TOKEN
+            - name: SHMA_SECRETS_ROTATION
+              value: "2024-01-01T00:00:00Z"
           volumeMounts:
             - name: secret-files
               mountPath: /etc/sample-service/certs/tls.crt
@@ -105,3 +111,4 @@ kubectl apply --dry-run=client --validate=true -f /tmp/ansible-runtime/sample-se
 - Ensure the referenced namespace (`k8s_namespace`) exists before applying.
 - Use the generated `<service_id>-files` Secret for only the workloads that truly need those files; other deployments can skip mounting the `secret-files` volume entirely.
 - Adjust `service_replicas` to scale deployments and rely on the readiness probe before routing traffic.
+- Confirm etcd encryption at rest is enabled (`kubectl get apiserver cluster -o jsonpath='{.spec.encryptionConfiguration}'`) before applying rendered Secrets; otherwise, configure encryption providers or document the risk for operators.

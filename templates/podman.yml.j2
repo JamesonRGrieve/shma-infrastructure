@@ -36,6 +36,7 @@
 {% set ports = service_ports | default((service_port is defined) | ternary([service_port], [])) %}
 {% set volumes = service_volumes | default([]) %}
 {% set inline_env = service_env | default([]) %}
+{% set inline_env_names = inline_env | map(attribute='name') | list %}
 {% set auto_update_mode = quadlet_auto_update | default('none') %}
 [Unit]
 Description={{ service_unit_description | default('Managed container for ' ~ (service_name | default(service_id))) }}
@@ -55,6 +56,9 @@ DropCapability={{ cap }}
 {% for env in inline_env %}
 Environment={{ env.name }}={{ env.value }}
 {% endfor %}
+{% if secrets is defined and secrets.rotation_timestamp is defined and secrets.rotation_timestamp is not none and 'SHMA_SECRETS_ROTATION' not in inline_env_names %}
+Environment=SHMA_SECRETS_ROTATION={{ secrets.rotation_timestamp }}
+{% endif %}
 {% if secret_env %}
 EnvironmentFile={{ env_file_path }}
 {% endif %}

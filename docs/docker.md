@@ -1,10 +1,10 @@
 # Docker Compose Deployment Guide
 
-Deploy services using Docker Compose with secret-aware environment files and Compose v2 tooling.
+Deploy services using Docker Compose with secret-aware environment injection and Compose v2 tooling.
 
 ## What's new
 
-- Secrets defined in the service contract populate a dedicated `./<service>.env` file; sensitive values no longer appear inline.
+- Secrets defined in the service contract travel via the Compose CLI environment so sensitive values never touch disk.
 - File-based secrets render into `secrets/` and are attached via Compose `secrets` blocks.
 - `community.docker.docker_compose_v2` drives deployments to align with the modern Docker CLI plugin.
 - Health probes come directly from `health.cmd` ensuring parity with other runtimes.
@@ -41,11 +41,11 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-    env_file:
-      - ./sample-service.env
     environment:
       APP_MODE: production
       APP_FEATURE_FLAG: "true"
+      SHMA_SECRETS_ROTATION: "2024-01-01T00:00:00Z"
+      SAMPLE_SERVICE_TOKEN: ${SAMPLE_SERVICE_TOKEN}
     volumes:
       - /srv/sample-service/config:/etc/sample-service
     tmpfs:
@@ -75,9 +75,10 @@ networks:
 
 ## Contract inputs
 
-- `secrets.env` entries feed the env file.
+- `secrets.env` entries become environment variables supplied directly to the Compose CLI; values stay in-memory during deployment.
 - `secrets.files` entries create files in `secrets/<name>` and populate the Compose `secrets` map.
 - `secrets.shred_after_apply` defaults to `true`, removing rendered secrets after deployment unless you explicitly opt out.
+- `secrets.rotation_timestamp` (optional) forces Compose to recreate containers whenever you bump the value—use it to rotate credentials without editing unrelated settings.
 - `service_ports` control host bindings; publish only the ports you intend to expose.
 - `service_volumes.host_path` mounts host directories directly, which keeps containers ephemeral while the data persists on the host. Omit the key to fall back to managed named volumes.
 - `mounts.persistent_volumes` names directories that require backups, while `mounts.ephemeral_mounts` defines tmpfs-backed paths for runtimes that support them.
@@ -96,10 +97,11 @@ docker compose -f /tmp/ansible-runtime/sample-service/docker.yml config
 
 `roles/common/apply_runtime/tasks/docker.yml`:
 
-1. Builds the env file and optional `secrets/` directory under the render output.
-2. Invokes `community.docker.docker_compose_v2` with `pull: always` to keep images fresh.
+1. Prepares the optional `secrets/` directory for file-based secrets.
+2. Invokes `community.docker.docker_compose_v2` with `pull: always`, injecting secret environment variables through Ansible's `environment` parameter.
 3. Shreds rendered secrets by default; set `secrets.shred_after_apply: false` for workloads that must retain them on disk.
 4. Sets `service_ip` for the unified health gate.
+5. Recreates containers automatically whenever `secrets.rotation_timestamp` changes.
 
 Use the shared health command to run a post-deploy verification:
 

@@ -65,17 +65,15 @@ def validate_examples(validator: Draft202012Validator, examples_dir: Path) -> in
         placeholder_failures: list[str] = []
         for secret in secrets.get("env", []) or []:
             value = secret.get("value", "")
-            if isinstance(value, str) and value.lower().startswith("change-me-"):
+            if isinstance(value, str) and value.lower().startswith("change-me"):
                 placeholder_failures.append(secret.get("name", "<unnamed>"))
         for secret in secrets.get("files", []) or []:
             raw_value = secret.get("value") or secret.get("content") or ""
-            if isinstance(raw_value, str) and raw_value.lower().startswith(
-                "change-me-"
-            ):
+            if isinstance(raw_value, str) and raw_value.lower().startswith("change-me"):
                 placeholder_failures.append(secret.get("name", "<unnamed>"))
         if placeholder_failures:
             failures.append(
-                f"{example}: secrets {', '.join(sorted(placeholder_failures))} retain change-me-* placeholders"
+                f"{example}: secrets {', '.join(sorted(placeholder_failures))} retain change-me placeholders"
             )
 
         if document.get("needs_container_runtime") is not True and document.get(

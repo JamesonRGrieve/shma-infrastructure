@@ -76,10 +76,10 @@
 - name: Validate secret environment values are not placeholders
   assert:
     that:
-      - not (item.value | default('') | lower).startswith('change-me-')
+      - not (item.value | default('') | lower).startswith('change-me')
     fail_msg: >-
       Secret {{ item.name | default('<unnamed>') }} retains placeholder value
-      "change-me-*". Provide a real secret before applying.
+      "change-me". Provide a real secret before applying.
   loop: "{{ secrets.env | default([]) }}"
   loop_control:
     label: "{{ item.name | default('<unnamed>') }}"
@@ -88,10 +88,10 @@
 - name: Validate secret file contents are not placeholders
   assert:
     that:
-      - not ((item.value | default(item.content | default(''))) | lower).startswith('change-me-')
+      - not ((item.value | default(item.content | default(''))) | lower).startswith('change-me')
     fail_msg: >-
       Secret file {{ item.name | default('<unnamed>') }} retains placeholder value
-      "change-me-*". Replace it with the real secret payload.
+      "change-me". Replace it with the real secret payload.
   loop: "{{ secrets.files | default([]) }}"
   loop_control:
     label: "{{ item.name | default('<unnamed>') }}"
