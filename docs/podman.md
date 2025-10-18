@@ -7,6 +7,7 @@ Deploy services using Podman Quadlets with environment files, optional user scop
 - `quadlet_scope` selects system-wide (`/etc/containers/systemd`) or per-user (`~/.config/containers/systemd`) installation.
 - Secrets from the contract populate an environment file and optional `secrets/` directory, mounted read-only into the container.
 - Health checks map directly to `HealthCmd/HealthInterval/HealthTimeout/HealthRetries` derived from `health.cmd`.
+- Host policy defaults to rejecting unsigned/unknown registries and the local Docker engine, keeping pulls scoped to approved sources.
 
 ## Requirements
 
@@ -64,7 +65,7 @@ For `quadlet_scope: user`, the environment file and secrets live under `~/.confi
 2. Writes the env file and optional secret files (with `0400` default permissions).
 3. Copies the `.container` unit.
 4. Executes `systemd` tasks with the correct scope and reloads daemons.
-5. Optionally shreds rendered secrets when `secrets.shred_after_apply` is enabled.
+5. Shreds rendered secrets by default; set `secrets.shred_after_apply: false` only when you need to retain them for debugging.
 6. Sets `service_ip` for the post-deploy health gate.
 
 Ensure lingering is enabled when deploying user-scoped units:
@@ -75,3 +76,21 @@ systemctl --user daemon-reload
 systemctl --user enable sample-service
 systemctl --user start sample-service
 ```
+
+## Registry policy
+
+`roles/podman_host/templates/policy.json.j2` now renders from `podman_host_policy_default` and `podman_host_policy_transports`.
+
+- The default policy rejects every transport, including `docker-daemon`, unless you opt in.
+- Allow trusted registries by adding entries such as:
+
+  ```yaml
+  podman_host_policy_transports:
+    docker:
+      "registry.example.com/team/":
+        - type: sigstoreSigned
+          keyPath: /etc/containers/policy.d/team.pub
+  ```
+
+  Use `signedBy` (GPG) or `sigstoreSigned` rules so Podman verifies content instead of blindly trusting TLS alone.
+- Keep `docker-daemon` denied unless you must ingest images from the local engine; if so, override the transport mapping explicitly for that host.

@@ -9,6 +9,20 @@
     state: present
   when: hardening_package_target | length > 0
 
+- name: Resolve cockpit package set for distribution
+  ansible.builtin.set_fact:
+    hardening_cockpit_package_target: "{{ hardening_cockpit_packages.get(ansible_distribution, hardening_cockpit_packages.get(ansible_os_family, [])) }}"
+  when: hardening_enable_cockpit
+
+- name: Ensure cockpit packages are installed when enabled
+  ansible.builtin.package:
+    name: "{{ hardening_cockpit_package_target }}"
+    state: present
+  when:
+    - hardening_enable_cockpit
+    - hardening_cockpit_package_target is defined
+    - hardening_cockpit_package_target | length > 0
+
 - name: Check for existing AIDE database
   ansible.builtin.stat:
     path: "{{ hardening_aide_db_path }}"
@@ -67,7 +81,7 @@
     mode: '0440'
   notify: Validate sudoers configuration
 
-- name: Configure sudo cockpit exception
+- name: Configure sudo cockpit exception when enabled
   ansible.builtin.copy:
     dest: /etc/sudoers.d/cockpit
     content: |-
@@ -76,12 +90,47 @@
     group: root
     mode: '0440'
   notify: Validate sudoers configuration
+  when: hardening_enable_cockpit
+
+- name: Remove sudo cockpit exception when disabled
+  ansible.builtin.file:
+    path: /etc/sudoers.d/cockpit
+    state: absent
+  notify: Validate sudoers configuration
+  when: not hardening_enable_cockpit
+
+- name: Ensure cockpit socket override directory exists when enabled
+  ansible.builtin.file:
+    path: /etc/systemd/system/cockpit.socket.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: hardening_enable_cockpit
+
+- name: Configure cockpit socket binding
+  ansible.builtin.template:
+    src: cockpit-listen.conf.j2
+    dest: /etc/systemd/system/cockpit.socket.d/listen.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload systemd daemon
+    - Restart cockpit socket
+  when: hardening_enable_cockpit
+
+- name: Remove cockpit socket override when disabled
+  ansible.builtin.file:
+    path: /etc/systemd/system/cockpit.socket.d/listen.conf
+    state: absent
+  notify: Reload systemd daemon
+  when: not hardening_enable_cockpit
 
 - name: Require TTY for sudo invocations
-  ansible.builtin.copy:
+  ansible.builtin.template:
+    src: sudo_requiretty.j2
     dest: /etc/sudoers.d/requiretty
-    content: |-
-      Defaults requiretty
     owner: root
     group: root
     mode: '0440'
@@ -113,6 +162,52 @@
     user: root
     job: /usr/bin/aide --check
     state: present
+
+- name: Configure log rotation for security tooling
+  ansible.builtin.template:
+    src: security_tools_logrotate.j2
+    dest: /etc/logrotate.d/hardening-security-tools
+    owner: root
+    group: root
+    mode: '0644'
+  when: >-
+    ansible_facts.packages.get('clamav') is defined or
+    ansible_facts.packages.get('clamav-daemon') is defined or
+    ansible_facts.packages.get('clamav-update') is defined or
+    ansible_facts.packages.get('clamd') is defined or
+    ansible_facts.packages.get('rkhunter') is defined or
+    ansible_facts.packages.get('chkrootkit') is defined
+
+- name: Ensure chkrootkit log directory exists
+  ansible.builtin.file:
+    path: /var/log/chkrootkit
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+  when: ansible_facts.packages.get('chkrootkit') is defined
+
+- name: Schedule rkhunter scans during the maintenance window
+  ansible.builtin.cron:
+    name: RKHunter maintenance scan
+    minute: "{{ hardening_security_tool_scan_minute }}"
+    hour: "{{ hardening_security_tool_scan_hour }}"
+    weekday: "{{ hardening_security_tool_scan_weekday }}"
+    user: root
+    job: /usr/bin/rkhunter --cronjob --quiet --report-warnings-only
+    state: present
+  when: ansible_facts.packages.get('rkhunter') is defined
+
+- name: Schedule chkrootkit scans during the maintenance window
+  ansible.builtin.cron:
+    name: chkrootkit maintenance scan
+    minute: "{{ hardening_security_tool_scan_minute }}"
+    hour: "{{ hardening_security_tool_scan_hour }}"
+    weekday: "{{ hardening_security_tool_scan_weekday }}"
+    user: root
+    job: nice -n 10 /usr/sbin/chkrootkit >> /var/log/chkrootkit/chkrootkit.log 2>&1
+    state: present
+  when: ansible_facts.packages.get('chkrootkit') is defined
 
 - name: Disable unnecessary services
   ansible.builtin.service:

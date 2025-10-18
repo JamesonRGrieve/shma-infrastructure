@@ -34,14 +34,21 @@
     - ufw default allow outgoing
   changed_when: false
 
-- name: Allow SSH and Cockpit in ufw
-  ansible.builtin.command: "ufw allow {{ item }}"
+- name: Allow SSH in ufw
+  ansible.builtin.command: "ufw allow {{ hardening_ssh_port }}/tcp"
   args:
     warn: false
-  loop:
-    - "{{ hardening_ssh_port }}/tcp"
-    - 9090/tcp
   changed_when: false
+
+- name: Allow cockpit management access in ufw
+  ansible.builtin.command: "ufw allow from {{ item }} to any port 9090 proto tcp"
+  args:
+    warn: false
+  loop: "{{ hardening_cockpit_allowed_sources }}"
+  changed_when: false
+  when:
+    - hardening_enable_cockpit
+    - hardening_cockpit_allowed_sources | length > 0
 
 - name: Enable ufw firewall
   ansible.builtin.command: ufw --force enable

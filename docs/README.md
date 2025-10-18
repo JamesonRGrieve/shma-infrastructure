@@ -91,7 +91,8 @@ The registry keeps validation decoupled from the Ansible inventory while ensurin
 ## Additional Options
 
 - `quadlet_scope` – set to `system` (default) or `user` to control where Quadlet units are installed. When using `quadlet_scope: user`, make sure lingering is enabled for the target user or user services are explicitly started at boot.
-- `secrets.shred_after_apply` – remove rendered secret files and env files immediately after the runtime adapter applies changes, leaving only in-memory material behind.
+- `secrets.shred_after_apply` – defaults to `true` so rendered secret files and env files are shredded once adapters finish. Override with `false` only when persistent copies are required.
+- `hardening_enable_cockpit` – opt-in toggle that installs Cockpit, binds it to `hardening_cockpit_listen_address` (defaults to `127.0.0.1`), and optionally opens UFW 9090 to the addresses listed in `hardening_cockpit_allowed_sources`.
 
 ## Continuous Integration
 

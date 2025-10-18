@@ -1,0 +1,4 @@
+Defaults requiretty
+{% for user in hardening_requiretty_exempt_users %}
+Defaults:{{ user }} !requiretty
+{% endfor %}

@@ -3,11 +3,6 @@ hardening_packages_common:
   Debian:
     - python3
     - openssh-server
-    - cockpit
-    - cockpit-networkmanager
-    - cockpit-packagekit
-    - cockpit-storaged
-    - cockpit-sosreport
     - unattended-upgrades
     - fail2ban
     - auditd
@@ -20,13 +15,6 @@ hardening_packages_common:
   Ubuntu:
     - python3
     - openssh-server
-    - cockpit
-    - cockpit-networkmanager
-    - cockpit-packagekit
-    - cockpit-storaged
-    - cockpit-pcp
-    - cockpit-sosreport
-    - cockpit-tuned
     - unattended-upgrades
     - fail2ban
     - auditd
@@ -39,11 +27,6 @@ hardening_packages_common:
   AlmaLinux:
     - python3
     - openssh-server
-    - cockpit
-    - cockpit-networkmanager
-    - cockpit-packagekit
-    - cockpit-storaged
-    - cockpit-sosreport
     - selinux-policy-targeted
     - policycoreutils-python-utils
     - dnf-automatic
@@ -64,3 +47,25 @@ hardening_fail2ban_log_path_map:
   Debian: /var/log/auth.log
   Ubuntu: /var/log/auth.log
   AlmaLinux: /var/log/secure
+
+hardening_cockpit_packages:
+  Debian:
+    - cockpit
+    - cockpit-networkmanager
+    - cockpit-packagekit
+    - cockpit-storaged
+    - cockpit-sosreport
+  Ubuntu:
+    - cockpit
+    - cockpit-networkmanager
+    - cockpit-packagekit
+    - cockpit-storaged
+    - cockpit-pcp
+    - cockpit-sosreport
+    - cockpit-tuned
+  AlmaLinux:
+    - cockpit
+    - cockpit-networkmanager
+    - cockpit-packagekit
+    - cockpit-storaged
+    - cockpit-sosreport

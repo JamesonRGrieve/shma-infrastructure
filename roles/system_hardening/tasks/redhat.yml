@@ -27,7 +27,7 @@
     immediate: true
   when: ansible_facts.packages.get('firewalld') is defined
 
-- name: Allow cockpit service via firewalld
+- name: Allow additional services via firewalld
   ansible.posix.firewalld:
     zone: "{{ hardening_firewalld_zone }}"
     service: "{{ item }}"
@@ -156,16 +156,6 @@
     dest: /var/log/chkrootkit-initial.log
     content: "{{ chkrootkit_run.stdout }}\n{{ chkrootkit_run.stderr }}"
   when: chkrootkit_run is defined and chkrootkit_run.stdout is defined
-
-- name: Schedule weekly chkrootkit scan
-  ansible.builtin.cron:
-    name: Weekly chkrootkit scan
-    minute: 0
-    hour: 2
-    weekday: 0
-    job: "/usr/sbin/chkrootkit > /var/log/chkrootkit-weekly.log 2>&1"
-    user: root
-  when: ansible_facts.packages.get('chkrootkit') is defined
 
 - name: Initialize AIDE database on Red Hat hosts
   ansible.builtin.command: aide --init

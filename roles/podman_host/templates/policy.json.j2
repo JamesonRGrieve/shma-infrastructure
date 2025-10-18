@@ -1,16 +1,12 @@
 {
-  "default": [
-    {
-      "type": "insecureAcceptAnything"
-    }
-  ],
+  "default": {{ podman_host_policy_default | to_json }},
   "transports": {
-    "docker-daemon": {
-      "": [
-        {
-          "type": "insecureAcceptAnything"
-        }
-      ]
-    }
+{% for transport, prefixes in podman_host_policy_transports | dictsort %}
+    "{{ transport }}": {
+{% for prefix, rules in prefixes | dictsort %}
+      "{{ prefix }}": {{ rules | to_json }}{% if not loop.last %},{% endif %}
+{% endfor %}
+    }{% if not loop.last %},{% endif %}
+{% endfor %}
   }
 }
