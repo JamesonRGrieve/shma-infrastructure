@@ -87,6 +87,11 @@
 {% for command in cmd_list %}
   {% set _ = commands_ns.items.append(command) %}
 {% endfor %}
+{% set has_packages = pkg_list | length > 0 %}
+{% set has_config = config_ns.items | length > 0 %}
+{% set has_services = svc_list | length > 0 %}
+{% set has_commands = commands_ns.items | length > 0 %}
+{% set has_setup = has_packages or has_config or has_services or has_commands %}
 {% if proxmox_tmpfs.items and (service_unit_name is defined or service_id is defined) %}
   {% set unit_name = service_unit_name | default(service_id) %}
   {% if unit_name %}
@@ -122,25 +127,36 @@ container:
   features: "keyctl=0"
 {% endif %}
 
+{% if has_setup %}
 setup:
-  packages:{% if pkg_list | length == 0 %} []{% else %}
+{% if has_packages %}
+  packages:
 {% for pkg in pkg_list %}
     - {{ pkg }}
-{% endfor %}{% endif %}
-  config:{% if config_ns.items | length == 0 %} []{% else %}
+{% endfor %}
+{% endif %}
+{% if has_config %}
+  config:
 {% for item in config_ns.items %}
     - path: {{ item.path }}
       content: |
 {{ item.content | indent(8, true) }}{% if item.mode is defined %}
-      mode: {{ item.mode }}{% endif %}
-{% endfor %}{% endif %}
-  services:{% if svc_list | length == 0 %} []{% else %}
+      mode: {{ item.mode }}{% endif %}{% if item.dir_mode is defined %}
+      dir_mode: {{ item.dir_mode }}{% endif %}
+{% endfor %}
+{% endif %}
+{% if has_services %}
+  services:
 {% for svc in svc_list %}
     - name: {{ svc.name }}
       enabled: {{ svc.enabled | default(true) | ternary(true, false) }}
       state: {{ svc.state | default('started') }}
-{% endfor %}{% endif %}
-  commands:{% if commands_ns.items | length == 0 %} []{% else %}
+{% endfor %}
+{% endif %}
+{% if has_commands %}
+  commands:
 {% for cmd in commands_ns.items %}
     - {{ cmd }}
-{% endfor %}{% endif %}
+{% endfor %}
+{% endif %}
+{% endif %}

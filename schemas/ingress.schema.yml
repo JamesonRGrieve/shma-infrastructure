@@ -16,6 +16,7 @@ properties:
       required:
         - host
         - port
+        - path_prefix
       additionalProperties: false
       properties:
         host:

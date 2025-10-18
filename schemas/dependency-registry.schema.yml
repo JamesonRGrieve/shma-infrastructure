@@ -1,0 +1,83 @@
+---
+title: Dependency Registry Schema
+type: object
+required:
+  - dependencies
+properties:
+  dependencies:
+    description: Mapping of dependency service names to their exported contracts.
+    oneOf:
+      - type: object
+        additionalProperties:
+          $ref: "#/$defs/dependency"
+      - type: array
+        items:
+          anyOf:
+            - type: string
+            - $ref: "#/$defs/dependency"
+additionalProperties: false
+$defs:
+  requirement:
+    type: object
+    required:
+      - name
+    properties:
+      name:
+        type: string
+      version:
+        type: string
+      exports_hash:
+        type: string
+    additionalProperties: false
+  dependency:
+    type: object
+    properties:
+      name:
+        type: string
+      version:
+        type: string
+      exports_hash:
+        type: string
+      requires:
+        type: array
+        items:
+          anyOf:
+            - type: string
+            - $ref: "#/$defs/requirement"
+      exports:
+        $ref: "#/$defs/exports"
+    additionalProperties: true
+  exports:
+    type: object
+    properties:
+      env:
+        type: array
+        items:
+          type: object
+          required:
+            - name
+            - value
+          properties:
+            name:
+              type: string
+            value:
+              type: string
+            description:
+              type: string
+      files:
+        type: array
+        items:
+          type: object
+          required:
+            - name
+            - value
+          properties:
+            name:
+              type: string
+            value:
+              type: string
+            target:
+              type: string
+            description:
+              type: string
+    additionalProperties: true

@@ -12,6 +12,8 @@ Deploy services using Podman Quadlets with environment files, optional user scop
 - `service_image` entries should be digest-pinned; combine with `quadlet_auto_update: none` to ensure only vetted images run.
 - `mounts.ephemeral_mounts` entries become `Tmpfs=` declarations hardened with `nosuid`, `nodev`, and `noexec` so containers only write to explicitly allowed paths.
 - Containers default to `User=65532:65532`, `ReadOnly=true`, `NoNewPrivileges=true`, `DropCapability=ALL`, and an empty `CapabilityBoundingSet`. Override with `service_security` only when workloads need extra permissions.
+- `service_resources.connections_per_second` surfaces as a `CONNECTIONS_PER_SECOND` variable so an nginx/envoy sidecar can
+  enforce per-pod rate limits in front of the workload.
 
 ## Requirements
 

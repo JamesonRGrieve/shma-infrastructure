@@ -17,10 +17,12 @@ properties:
     type: string
   service_image:
     type: string
+    pattern: "^.+@sha256:[0-9a-f]{64}$"
   service_ip:
     type: string
   service_port:
     type: object
+    deprecated: true
     properties:
       target:
         type: integer
@@ -139,6 +141,9 @@ properties:
         type: integer
       cpu_cores:
         type: number
+      connections_per_second:
+        type: integer
+        minimum: 1
   service_namespace:
     type: string
   service_replicas:
@@ -179,11 +184,9 @@ properties:
       unprivileged:
         type: string
       features:
-        oneOf:
-          - type: string
-          - type: array
-            items:
-              type: string
+        type: array
+        items:
+          type: string
   needs_container_runtime:
     type: boolean
 
@@ -194,7 +197,18 @@ properties:
   requires:
     type: array
     items:
-      type: string
+      anyOf:
+        - type: string
+        - type: object
+          required:
+            - name
+          properties:
+            name:
+              type: string
+            version:
+              type: string
+            exports_hash:
+              type: string
   exports:
     type: object
     properties:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import ssl
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -204,6 +205,121 @@ def compute_metadata(
     return metadata
 
 
+def collect_secret_values(service: dict) -> dict[str, str]:
+    secrets = service.get("secrets") or {}
+    secret_values: dict[str, str] = {}
+
+    for file_secret in secrets.get("files", []) or []:
+        name = file_secret.get("name")
+        if not name:
+            continue
+        value = file_secret.get("value")
+        if value is None:
+            value = file_secret.get("content")
+        if value is None:
+            continue
+        secret_values[name] = str(value)
+
+    for env_secret in secrets.get("env", []) or []:
+        name = env_secret.get("name")
+        if not name:
+            continue
+        value = env_secret.get("value")
+        if value is None:
+            continue
+        secret_values[name] = str(value)
+
+    return secret_values
+
+
+def validate_pem_certificate(secret_name: str, pem_data: str) -> None:
+    pem_text = pem_data.strip()
+    if "BEGIN CERTIFICATE" not in pem_text:
+        raise ValueError(
+            f"Secret '{secret_name}' does not contain a PEM certificate block"
+        )
+    chunks = []
+    for block in pem_text.split("-----END CERTIFICATE-----"):
+        block = block.strip()
+        if not block:
+            continue
+        if "-----BEGIN CERTIFICATE-----" not in block:
+            continue
+        chunks.append(block + "\n-----END CERTIFICATE-----\n")
+    if not chunks:
+        raise ValueError(
+            f"Secret '{secret_name}' does not contain a PEM certificate block"
+        )
+    for cert in chunks:
+        try:
+            ssl.PEM_cert_to_DER_cert(cert)
+        except ValueError as exc:  # pragma: no cover - defensive
+            raise ValueError(
+                f"Secret '{secret_name}' contains an invalid PEM certificate"
+            ) from exc
+
+
+def validate_private_key(secret_name: str, key_data: str) -> None:
+    key_text = key_data.strip()
+    if "BEGIN" not in key_text or "PRIVATE KEY" not in key_text:
+        raise ValueError(f"Secret '{secret_name}' does not contain a PEM private key")
+
+
+def validate_tls_assets(service: dict, normalized: dict) -> None:
+    secret_values = collect_secret_values(service)
+    errors: list[str] = []
+
+    for index, route in enumerate(normalized.get("routes", [])):
+        host = route.get("host", f"route-{index}")
+        tls = route.get("tls", {})
+        if tls.get("mode") == "provided":
+            for field, validator in (
+                ("certificate_secret", validate_pem_certificate),
+                ("key_secret", validate_private_key),
+                ("chain_secret", validate_pem_certificate),
+            ):
+                secret_name = tls.get(field)
+                if field in ("certificate_secret", "key_secret") and not secret_name:
+                    errors.append(
+                        f"Ingress route '{host}' requires '{field}' when tls.mode is 'provided'"
+                    )
+                    continue
+                if not secret_name:
+                    continue
+                secret_value = secret_values.get(secret_name)
+                if not secret_value:
+                    errors.append(
+                        f"Secret '{secret_name}' referenced by '{field}' for ingress route '{host}' was not found in service secrets"
+                    )
+                    continue
+                try:
+                    validator(secret_name, secret_value)
+                except ValueError as exc:
+                    errors.append(str(exc))
+
+        mtls = route.get("mtls") or {}
+        if mtls:
+            ca_secret = mtls.get("ca_secret")
+            if not ca_secret:
+                errors.append(
+                    f"Ingress route '{host}' defines mTLS but omits 'ca_secret'"
+                )
+            else:
+                ca_value = secret_values.get(ca_secret)
+                if not ca_value:
+                    errors.append(
+                        f"Secret '{ca_secret}' referenced by mTLS for ingress route '{host}' was not found in service secrets"
+                    )
+                else:
+                    try:
+                        validate_pem_certificate(ca_secret, ca_value)
+                    except ValueError as exc:
+                        errors.append(str(exc))
+
+    if errors:
+        raise ValueError("; ".join(errors))
+
+
 def run_module() -> None:
     module = AnsibleModule(
         argument_spec={
@@ -240,6 +356,10 @@ def run_module() -> None:
         module.fail_json(msg=f"Ingress spec failed validation: {exc}")
 
     normalized = normalize_ingress(ingress_spec)
+    try:
+        validate_tls_assets(service, normalized)
+    except ValueError as exc:
+        module.fail_json(msg=str(exc))
     metadata = compute_metadata(
         module.params["managed_by"], module.params["owner"], service, normalized
     )

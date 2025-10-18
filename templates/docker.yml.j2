@@ -27,10 +27,13 @@
   'container_name': service_name | default(service_id),
   'image': service_image,
   'env': service_env | default([]),
-  'ports': service_ports | default((service_port is defined) | ternary([service_port], [])),
+  'ports': service_ports | default([]),
   'volumes': service_volumes | default([]),
   'networks': service_networks | default(['app-network'])
 }]) %}
+{% set resources = service_resources | default({}) %}
+{% set connections_per_second = resources.connections_per_second if resources.connections_per_second is defined else None %}
+{% set primary_service_name = service_name | default(service_id) %}
 {% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] %}
 {% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
 {% set env_file_name = (service_name | default(service_id)) + '.env' %}
@@ -135,6 +138,9 @@ services:
 {% endfor %}
 {% endif %}
 {% set inline_env = svc.env | default([]) %}
+{% if connections_per_second and svc.name == primary_service_name %}
+  {% set inline_env = inline_env + [{'name': 'CONNECTIONS_PER_SECOND', 'value': connections_per_second | string}] %}
+{% endif %}
 {% if inline_env %}
     environment:
 {% for item in inline_env %}
