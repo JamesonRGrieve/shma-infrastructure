@@ -1,0 +1,42 @@
+---
+hardening_ssh_port: 6922
+hardening_authorized_users: []  # list of {name: user, key: ssh-rsa ...}
+hardening_fail2ban_maxretry: 3
+hardening_fail2ban_bantime: 3600
+hardening_fail2ban_findtime: 600
+hardening_enable_ipv6: false
+hardening_weekly_aide_check_minute: 0
+hardening_weekly_aide_check_hour: 3
+hardening_weekly_aide_check_day: 1
+hardening_disable_services:
+  - bluetooth.service
+  - cups.service
+hardening_additional_disable_services: []
+hardening_aide_init_timeout: 1800
+hardening_use_async_aide: true
+hardening_ipv6_disable_targets:
+  - net.ipv6.conf.all.disable_ipv6
+  - net.ipv6.conf.default.disable_ipv6
+  - net.ipv6.conf.lo.disable_ipv6
+hardening_sysctl_common:
+  - { name: 'net.ipv4.conf.all.accept_redirects', value: '0' }
+  - { name: 'net.ipv4.conf.all.send_redirects', value: '0' }
+  - { name: 'net.ipv4.conf.all.accept_source_route', value: '0' }
+  - { name: 'net.ipv4.icmp_echo_ignore_broadcasts', value: '1' }
+  - { name: 'net.ipv4.tcp_syncookies', value: '1' }
+  - { name: 'net.ipv4.conf.all.rp_filter', value: '1' }
+  - { name: 'net.ipv4.conf.default.rp_filter', value: '1' }
+  - { name: 'net.ipv4.conf.all.log_martians', value: '1' }
+  - { name: 'kernel.randomize_va_space', value: '2' }
+  - { name: 'kernel.panic', value: '10' }
+  - { name: 'kernel.yama.ptrace_scope', value: '1' }
+hardening_umask_targets:
+  - /etc/profile
+  - /etc/bash.bashrc
+  - /etc/zsh/zshrc
+hardening_aide_db_path: /var/lib/aide/aide.db.gz
+hardening_aide_new_db_path: /var/lib/aide/aide.db.new.gz
+hardening_firewalld_zone: public
+hardening_firewalld_services:
+  - cockpit
+hardening_firewalld_ports: []

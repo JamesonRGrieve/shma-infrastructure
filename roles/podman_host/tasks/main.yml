@@ -1,0 +1,7 @@
+---
+- name: Include operating system specific setup
+  ansible.builtin.include_tasks: "{{ 'debian.yml' if ansible_os_family == 'Debian' else 'redhat.yml' }}"
+  when: ansible_os_family in ['Debian', 'RedHat']
+
+- name: Include common Podman configuration
+  ansible.builtin.import_tasks: common.yml

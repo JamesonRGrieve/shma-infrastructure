@@ -1,0 +1,66 @@
+---
+hardening_packages_common:
+  Debian:
+    - python3
+    - openssh-server
+    - cockpit
+    - cockpit-networkmanager
+    - cockpit-packagekit
+    - cockpit-storaged
+    - cockpit-sosreport
+    - unattended-upgrades
+    - fail2ban
+    - auditd
+    - acct
+    - clamav
+    - clamav-daemon
+    - rkhunter
+    - aide
+    - ufw
+  Ubuntu:
+    - python3
+    - openssh-server
+    - cockpit
+    - cockpit-networkmanager
+    - cockpit-packagekit
+    - cockpit-storaged
+    - cockpit-pcp
+    - cockpit-sosreport
+    - cockpit-tuned
+    - unattended-upgrades
+    - fail2ban
+    - auditd
+    - acct
+    - clamav
+    - clamav-daemon
+    - rkhunter
+    - aide
+    - ufw
+  AlmaLinux:
+    - python3
+    - openssh-server
+    - cockpit
+    - cockpit-networkmanager
+    - cockpit-packagekit
+    - cockpit-storaged
+    - cockpit-sosreport
+    - selinux-policy-targeted
+    - policycoreutils-python-utils
+    - dnf-automatic
+    - epel-release
+    - fail2ban
+    - python3-fail2ban
+    - audit
+    - clamav
+    - clamav-update
+    - clamd
+    - chkrootkit
+    - aide
+    - firewalld
+hardening_firewalld_ports_map:
+  default:
+    - "{{ hardening_ssh_port }}/tcp"
+hardening_fail2ban_log_path_map:
+  Debian: /var/log/auth.log
+  Ubuntu: /var/log/auth.log
+  AlmaLinux: /var/log/secure

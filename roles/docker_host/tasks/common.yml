@@ -1,0 +1,50 @@
+---
+- name: Ensure docker group exists
+  ansible.builtin.group:
+    name: docker
+    state: present
+
+- name: Add users to docker group
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: docker
+    append: true
+  loop: "{{ docker_host_users }}"
+  when: docker_host_users | length > 0
+
+- name: Configure Docker daemon JSON when specified
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: "{{ docker_host_daemon_config | to_nice_json(indent=2) }}\n"
+    owner: root
+    group: root
+    mode: '0644'
+  when: docker_host_daemon_config | length > 0
+  notify: Restart docker
+
+- name: Ensure docker service is enabled on systemd hosts
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: true
+  when:
+    - docker_host_enable_service
+    - ansible_service_mgr == 'systemd'
+
+- name: Check for docker compose plugin
+  ansible.builtin.stat:
+    path: /usr/libexec/docker/cli-plugins/docker-compose
+  register: docker_compose_plugin
+  when: ansible_os_family == 'RedHat'
+
+- name: Enable docker-compose compatibility symlink when needed
+  ansible.builtin.file:
+    src: /usr/libexec/docker/cli-plugins/docker-compose
+    dest: /usr/local/bin/docker-compose
+    state: link
+  when:
+    - ansible_os_family == 'RedHat'
+    - docker_host_enable_service
+    - docker_compose_plugin is defined
+    - docker_compose_plugin.stat.exists
+

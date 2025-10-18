@@ -1,0 +1,15 @@
+---
+- name: Gather package facts
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Include common hardening tasks
+  ansible.builtin.import_tasks: common.yml
+
+- name: Include Debian family hardening
+  ansible.builtin.include_tasks: debian.yml
+  when: ansible_os_family == 'Debian'
+
+- name: Include Red Hat family hardening
+  ansible.builtin.include_tasks: redhat.yml
+  when: ansible_os_family == 'RedHat'

@@ -1,0 +1,196 @@
+---
+- name: Ensure latest packages are installed
+  ansible.builtin.dnf:
+    name: "*"
+    state: latest
+    update_cache: true
+
+- name: Query current firewalld default zone
+  ansible.builtin.command: firewall-cmd --get-default-zone
+  register: firewalld_current_zone
+  changed_when: false
+  failed_when: firewalld_current_zone.rc not in [0, 252]
+  when: ansible_facts.packages.get('firewalld') is defined
+
+- name: Configure firewalld default zone
+  ansible.builtin.command: "firewall-cmd --set-default-zone={{ hardening_firewalld_zone }}"
+  when:
+    - ansible_facts.packages.get('firewalld') is defined
+    - firewalld_current_zone.stdout is defined
+    - firewalld_current_zone.stdout.strip() != hardening_firewalld_zone
+
+- name: Ensure firewalld zone target is drop
+  ansible.posix.firewalld:
+    zone: "{{ hardening_firewalld_zone }}"
+    target: DROP
+    permanent: true
+    immediate: true
+  when: ansible_facts.packages.get('firewalld') is defined
+
+- name: Allow cockpit service via firewalld
+  ansible.posix.firewalld:
+    zone: "{{ hardening_firewalld_zone }}"
+    service: "{{ item }}"
+    permanent: true
+    state: enabled
+    immediate: true
+  loop: "{{ hardening_firewalld_services }}"
+  when: ansible_facts.packages.get('firewalld') is defined
+
+- name: Allow SSH port via firewalld
+  ansible.posix.firewalld:
+    zone: "{{ hardening_firewalld_zone }}"
+    port: "{{ item }}"
+    permanent: true
+    state: enabled
+    immediate: true
+  loop: "{{ hardening_firewalld_ports_map.get('default') }}"
+  when: ansible_facts.packages.get('firewalld') is defined
+
+- name: Reload firewalld configuration
+  ansible.posix.firewalld:
+    state: reloaded
+  when: ansible_facts.packages.get('firewalld') is defined
+
+- name: Ensure SELinux configuration file enforces mode
+  ansible.builtin.replace:
+    path: /etc/selinux/config
+    regexp: '^SELINUX=.*'
+    replace: 'SELINUX=enforcing'
+  notify: Restart SSH service
+  when: ansible_facts.packages.get('selinux-policy-targeted') is defined
+
+- name: Set SELinux enforcing at runtime
+  ansible.builtin.command: setenforce 1
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_selinux is defined
+    - ansible_selinux.status == 'enabled'
+    - ansible_selinux.mode != 'enforcing'
+
+- name: Allow SSH custom port in SELinux
+  ansible.posix.seport:
+    ports: "{{ hardening_ssh_port }}"
+    proto: tcp
+    setype: ssh_port_t
+    state: present
+  when:
+    - hardening_ssh_port | int != 22
+    - ansible_selinux is defined
+    - ansible_selinux.status == 'enabled'
+
+- name: Deploy fail2ban SSH jail configuration
+  ansible.builtin.template:
+    src: fail2ban_ssh.conf.j2
+    dest: /etc/fail2ban/jail.d/ssh.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Configure dnf-automatic for security updates
+  ansible.builtin.ini_file:
+    path: /etc/dnf/automatic.conf
+    section: commands
+    option: apply_updates
+    value: 'yes'
+  when: ansible_facts.packages.get('dnf-automatic') is defined
+
+- name: Configure dnf-automatic security only
+  ansible.builtin.ini_file:
+    path: /etc/dnf/automatic.conf
+    section: commands
+    option: upgrade_type
+    value: security
+  when: ansible_facts.packages.get('dnf-automatic') is defined
+
+- name: Ensure dnf-automatic timer enabled
+  ansible.builtin.systemd:
+    name: dnf-automatic.timer
+    state: started
+    enabled: true
+  when: ansible_facts.packages.get('dnf-automatic') is defined
+
+- name: Prepare ClamAV directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: clamav
+    group: clamav
+    mode: '0755'
+  loop:
+    - /var/lib/clamav
+    - /run/clamd.scan
+    - /var/log/clamd.scan
+  ignore_errors: true
+  when: ansible_facts.packages.get('clamav') is defined
+
+- name: Update ClamAV signatures
+  ansible.builtin.command: timeout 300 freshclam
+  changed_when: false
+  failed_when: false
+  when: ansible_facts.packages.get('clamav') is defined
+
+- name: Ensure security services are enabled
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop:
+    - fail2ban
+    - auditd
+    - clamd@scan
+  ignore_errors: true
+
+- name: Run initial chkrootkit scan
+  ansible.builtin.command: chkrootkit
+  args:
+    creates: /var/log/chkrootkit-initial.log
+  register: chkrootkit_run
+  failed_when: false
+  changed_when: chkrootkit_run.rc == 0
+  when: ansible_facts.packages.get('chkrootkit') is defined
+
+- name: Capture chkrootkit initial log
+  ansible.builtin.copy:
+    dest: /var/log/chkrootkit-initial.log
+    content: "{{ chkrootkit_run.stdout }}\n{{ chkrootkit_run.stderr }}"
+  when: chkrootkit_run is defined and chkrootkit_run.stdout is defined
+
+- name: Schedule weekly chkrootkit scan
+  ansible.builtin.cron:
+    name: Weekly chkrootkit scan
+    minute: 0
+    hour: 2
+    weekday: 0
+    job: "/usr/sbin/chkrootkit > /var/log/chkrootkit-weekly.log 2>&1"
+    user: root
+  when: ansible_facts.packages.get('chkrootkit') is defined
+
+- name: Initialize AIDE database on Red Hat hosts
+  ansible.builtin.command: aide --init
+  args:
+    creates: "{{ hardening_aide_new_db_path }}"
+  register: aide_init_redhat
+  changed_when: aide_init_redhat.rc == 0
+  when:
+    - ansible_facts.packages.get('aide') is defined
+    - not hardening_aide_db.stat.exists
+
+- name: Promote initialized AIDE database
+  ansible.builtin.command: "mv {{ hardening_aide_new_db_path }} {{ hardening_aide_db_path }}"
+  when:
+    - ansible_facts.packages.get('aide') is defined
+    - aide_init_redhat is defined
+    - aide_init_redhat.rc == 0
+    - aide_init_redhat is changed
+
+- name: Record AIDE database initialization on Red Hat hosts
+  ansible.builtin.set_fact:
+    hardening_aide_db:
+      stat:
+        exists: true
+  when:
+    - ansible_facts.packages.get('aide') is defined
+    - aide_init_redhat is defined
+    - aide_init_redhat.rc == 0

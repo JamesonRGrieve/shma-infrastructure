@@ -1,0 +1,151 @@
+---
+- name: Ensure Podman service user exists
+  ansible.builtin.user:
+    name: "{{ podman_host_user }}"
+    comment: "{{ podman_host_user_comment }}"
+    shell: "{{ podman_host_user_shell }}"
+    create_home: true
+    password_lock: true
+
+- name: Add Podman user to systemd-journal group
+  ansible.builtin.user:
+    name: "{{ podman_host_user }}"
+    groups: systemd-journal
+    append: true
+  ignore_errors: true
+
+- name: Configure subuid allocation for Podman user
+  ansible.builtin.lineinfile:
+    path: /etc/subuid
+    create: true
+    line: "{{ podman_host_user }}:{{ podman_host_uid_range_start }}:{{ podman_host_uid_range_size }}"
+    state: present
+
+- name: Configure subgid allocation for Podman user
+  ansible.builtin.lineinfile:
+    path: /etc/subgid
+    create: true
+    line: "{{ podman_host_user }}:{{ podman_host_uid_range_start }}:{{ podman_host_uid_range_size }}"
+    state: present
+
+- name: Lookup Podman user UID
+  ansible.builtin.command: "id -u {{ podman_host_user }}"
+  register: podman_uid_lookup
+  changed_when: false
+
+- name: Set Podman UID fact
+  ansible.builtin.set_fact:
+    podman_host_uid: "{{ podman_uid_lookup.stdout | int }}"
+
+- name: Ensure Podman configuration directory exists
+  ansible.builtin.file:
+    path: "/home/{{ podman_host_user }}/.config/containers"
+    state: directory
+    owner: "{{ podman_host_user }}"
+    group: "{{ podman_host_user }}"
+    mode: '0750'
+
+- name: Deploy rootless containers configuration
+  ansible.builtin.template:
+    src: containers.conf.j2
+    dest: "/home/{{ podman_host_user }}/.config/containers/containers.conf"
+    owner: "{{ podman_host_user }}"
+    group: "{{ podman_host_user }}"
+    mode: '0640'
+
+- name: Deploy rootless storage configuration
+  ansible.builtin.template:
+    src: storage.conf.j2
+    dest: "/home/{{ podman_host_user }}/.config/containers/storage.conf"
+    owner: "{{ podman_host_user }}"
+    group: "{{ podman_host_user }}"
+    mode: '0640'
+
+- name: Deploy container policy configuration
+  ansible.builtin.template:
+    src: policy.json.j2
+    dest: /etc/containers/policy.json
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Ensure Podman log directory exists
+  ansible.builtin.file:
+    path: "{{ podman_host_log_dir }}"
+    state: directory
+    owner: "{{ podman_host_user }}"
+    group: "{{ podman_host_user }}"
+    mode: '0750'
+
+- name: Install Podman security wrapper
+  ansible.builtin.template:
+    src: secure-podman.sh.j2
+    dest: "{{ podman_host_secure_wrapper_path }}"
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Ensure Podman runtime directory exists
+  ansible.builtin.file:
+    path: "/run/user/{{ podman_host_uid }}"
+    state: directory
+    owner: "{{ podman_host_user }}"
+    group: "{{ podman_host_user }}"
+    mode: '0700'
+
+- name: Configure tmpfiles entry for Podman runtime
+  ansible.builtin.template:
+    src: tmpfiles.conf.j2
+    dest: "/etc/tmpfiles.d/{{ podman_host_user }}.conf"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Apply tmpfiles configuration
+  ansible.builtin.command: "systemd-tmpfiles --create /etc/tmpfiles.d/{{ podman_host_user }}.conf"
+  changed_when: false
+  failed_when: false
+
+- name: Enable lingering for Podman user
+  ansible.builtin.command: "loginctl enable-linger {{ podman_host_user }}"
+  args:
+    creates: "/var/lib/systemd/linger/{{ podman_host_user }}"
+  when: ansible_service_mgr == 'systemd'
+
+- name: Enable Podman socket for service user
+  ansible.builtin.systemd:
+    name: podman.socket
+    scope: user
+    state: started
+    enabled: true
+  become: true
+  become_user: "{{ podman_host_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ podman_host_uid }}"
+  when: ansible_service_mgr == 'systemd'
+
+- name: Harden Podman home permissions
+  ansible.builtin.file:
+    path: "/home/{{ podman_host_user }}"
+    state: directory
+    owner: "{{ podman_host_user }}"
+    group: "{{ podman_host_user }}"
+    mode: '0700'
+
+- name: Ensure Podman containers configuration directory permissions
+  ansible.builtin.file:
+    path: "/home/{{ podman_host_user }}/.config/containers"
+    state: directory
+    owner: "{{ podman_host_user }}"
+    group: "{{ podman_host_user }}"
+    mode: '0750'
+    recurse: true
+
+- name: Configure weekly Podman cleanup cron job
+  ansible.builtin.cron:
+    name: Podman system prune
+    minute: "{{ podman_host_cron_minute }}"
+    hour: "{{ podman_host_cron_hour }}"
+    weekday: 0
+    job: "{{ podman_host_prune_command }}"
+    user: "{{ podman_host_user }}"

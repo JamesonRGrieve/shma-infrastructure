@@ -1,0 +1,25 @@
+---
+- name: Ensure Docker prerequisites present on Red Hat hosts
+  ansible.builtin.dnf:
+    name: "{{ docker_host_prereq_packages.get(ansible_distribution, docker_host_prereq_packages.get('AlmaLinux', [])) }}"
+    state: present
+    update_cache: true
+
+- name: Configure Docker CE repository
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/centos/docker-ce.repo
+    dest: /etc/yum.repos.d/docker-ce.repo
+    mode: '0644'
+
+- name: Install Docker engine packages
+  ansible.builtin.dnf:
+    name: "{{ docker_host_package_map.get(ansible_distribution, docker_host_package_map.get('AlmaLinux', [])) }}"
+    state: present
+    enablerepo: docker-ce-stable
+
+- name: Ensure docker service is enabled
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: true
+  when: docker_host_enable_service

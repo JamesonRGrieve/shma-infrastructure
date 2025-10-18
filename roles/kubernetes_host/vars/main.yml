@@ -1,0 +1,18 @@
+---
+kubernetes_packages:
+  Debian:
+    - kubelet
+    - kubeadm
+    - kubectl
+  Ubuntu:
+    - kubelet
+    - kubeadm
+    - kubectl
+  AlmaLinux:
+    - kubelet
+    - kubeadm
+    - kubectl
+kubernetes_repo_base:
+  Debian: https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_version }}/deb/
+  Ubuntu: https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_version }}/deb/
+  AlmaLinux: https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_version }}/rpm/

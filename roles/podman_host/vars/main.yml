@@ -1,0 +1,25 @@
+---
+podman_host_packages:
+  Debian:
+    - podman
+    - cockpit-podman
+    - uidmap
+    - slirp4netns
+    - fuse-overlayfs
+    - acl
+  Ubuntu:
+    - podman
+    - cockpit-podman
+    - uidmap
+    - slirp4netns
+    - fuse-overlayfs
+    - acl
+  AlmaLinux:
+    - podman
+    - cockpit-podman
+    - containers-common
+    - fuse-overlayfs
+    - slirp4netns
+    - acl
+    - shadow-utils
+    - shadow-utils-subid
