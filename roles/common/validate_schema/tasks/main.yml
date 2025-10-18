@@ -10,7 +10,8 @@
       - service_name is defined
       - service_image is defined
       - exports is defined
-      - storage is defined
+      - mounts is defined
+      - mounts.persistent_volumes is defined
       - health is defined
       - runtime_templates is defined
     fail_msg: "Service {{ service_id | default('unknown') }} is missing required contract fields"

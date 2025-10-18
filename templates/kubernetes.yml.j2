@@ -1,5 +1,31 @@
 {% set svc_name = service_name | default(service_id) %}
 {% set namespace = service_namespace | default('default') %}
+{% set mounts_config = mounts | default({}) %}
+{% set ephemeral_mounts = mounts_config.ephemeral_mounts | default([]) %}
+{% set default_apply_targets = ['docker', 'podman', 'kubernetes', 'proxmox', 'baremetal'] %}
+{% set security = service_security | default({}) %}
+{% set default_run_user = security.run_as_user if security.run_as_user is defined else 65532 %}
+{% set default_run_group = security.run_as_group if security.run_as_group is defined else default_run_user %}
+{% set read_only_root = security.read_only_root_filesystem if security.read_only_root_filesystem is defined else true %}
+{% set drop_caps_default = security.capabilities_drop | default(['ALL']) %}
+{% if drop_caps_default is string %}{% set drop_caps_default = [drop_caps_default] %}{% endif %}
+{% set no_new_privs = security.no_new_privileges if security.no_new_privileges is defined else true %}
+{% set allow_priv_escalation = security.allow_privilege_escalation if security.allow_privilege_escalation is defined else (not no_new_privs) %}
+{% set k8s_ephemeral = namespace(items=[]) %}
+{% for mount in ephemeral_mounts %}
+  {% set apply_targets = mount.apply_to | default(default_apply_targets) %}
+  {% if 'kubernetes' in apply_targets %}
+    {% set volume_name = mount.name | default('ephemeral-' ~ loop.index) %}
+    {% set entry = {
+      'volume_name': volume_name,
+      'mount_path': mount.path,
+      'medium': mount.medium | default('Memory'),
+      'size': mount.size if mount.size is defined else None,
+      'read_only': mount.read_only if mount.read_only is defined else false
+    } %}
+    {% set _ = k8s_ephemeral.items.append(entry) %}
+  {% endif %}
+{% endfor %}
 {% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] %}
 {% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
 {% set env_secret_name = svc_name + '-env' %}
@@ -88,6 +114,19 @@ spec:
       containers:
         - name: {{ svc_name }}
           image: {{ service_image }}
+          securityContext:
+            runAsUser: {{ default_run_user | int }}
+            runAsGroup: {{ default_run_group | int }}
+            runAsNonRoot: true
+            readOnlyRootFilesystem: {{ read_only_root | ternary(true, false) }}
+            allowPrivilegeEscalation: {{ allow_priv_escalation | ternary(true, false) }}
+{% if drop_caps_default %}
+            capabilities:
+              drop:
+{% for cap in drop_caps_default %}
+                - {{ cap }}
+{% endfor %}
+{% endif %}
           env:
 {% for item in secret_env %}
             - name: {{ item.name }}
@@ -105,6 +144,11 @@ spec:
           volumeMounts:
             - name: data
               mountPath: {{ volume_mount_path }}
+{% for mount in k8s_ephemeral.items %}
+            - name: {{ mount.volume_name }}
+              mountPath: {{ mount.mount_path }}
+              readOnly: {{ mount.read_only | ternary(true, false) }}
+{% endfor %}
 {% if file_secrets %}
 {% for secret in file_secrets %}
             - name: secret-files
@@ -151,6 +195,14 @@ spec:
           persistentVolumeClaim:
             claimName: {{ svc_name }}-data
 {% endif %}
+{% for mount in k8s_ephemeral.items %}
+        - name: {{ mount.volume_name }}
+          emptyDir:
+            medium: {{ mount.medium | default('Memory') }}
+{% if mount.size %}
+            sizeLimit: {{ mount.size }}
+{% endif %}
+{% endfor %}
 {% if file_secrets %}
         - name: secret-files
           secret:

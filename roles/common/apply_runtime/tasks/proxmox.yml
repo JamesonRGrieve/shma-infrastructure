@@ -73,6 +73,21 @@
     DEBIAN_FRONTEND: noninteractive
   when: lxc_config.setup.packages is defined and lxc_config.setup.packages | length > 0
 
+- name: Ensure configuration directories exist
+  delegate_to: "{{ container_ip }}"
+  become: true
+  file:
+    path: "{{ (item.path | regex_replace('/[^/]+$', '')) | default('/') }}"
+    state: directory
+    mode: "{{ item.dir_mode | default('0755') }}"
+  loop: "{{ lxc_config.setup.config | default([]) }}"
+  when:
+    - lxc_config.setup.config is defined
+    - item.path is defined
+    - item.path | length > 1
+    - item.path is string
+    - item.path.startswith('/')
+
 - name: Write config files
   delegate_to: "{{ container_ip }}"
   become: true

@@ -61,9 +61,21 @@ exports:
       description: Base URL for dependent services
     - name: SAMPLE_SERVICE_PORT
       value: "8080"
-storage:
-  - name: config
-    path: /etc/sample-service
+mounts:
+  persistent_volumes:
+    - name: config
+      path: /etc/sample-service
+  ephemeral_mounts:
+    - name: runtime-run
+      path: /run/sample-service
+      apply_to: [docker, podman, kubernetes, proxmox, baremetal]
+      medium: Memory
+      size: 64Mi
+      mode: '0755'
+    - name: runtime-tmp
+      path: /tmp/sample-service
+      apply_to: [docker, podman]
+      size: 64Mi
 health:
   cmd:
     - /bin/sh
@@ -73,11 +85,11 @@ health:
   timeout: 5s
   retries: 3
 runtime_templates:
-  proxmox: templates/proxmox.yml.j2
-  docker: templates/docker.yml.j2
-  podman: templates/podman.yml.j2
-  kubernetes: templates/kubernetes.yml.j2
-  baremetal: templates/baremetal.yml.j2
+  proxmox: ../templates/proxmox.yml.j2
+  docker: ../templates/docker.yml.j2
+  podman: ../templates/podman.yml.j2
+  kubernetes: ../templates/kubernetes.yml.j2
+  baremetal: ../templates/baremetal.yml.j2
 secrets:
   shred_after_apply: true
   env:

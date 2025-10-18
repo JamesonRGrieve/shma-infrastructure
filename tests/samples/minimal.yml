@@ -14,18 +14,20 @@ service_namespace: minimal
 service_replicas: 1
 service_storage_gb: 1
 runtime_templates:
-  proxmox: templates/proxmox.yml.j2
-  docker: templates/docker.yml.j2
-  podman: templates/podman.yml.j2
-  kubernetes: templates/kubernetes.yml.j2
-  baremetal: templates/baremetal.yml.j2
+  proxmox: ../templates/proxmox.yml.j2
+  docker: ../templates/docker.yml.j2
+  podman: ../templates/podman.yml.j2
+  kubernetes: ../templates/kubernetes.yml.j2
+  baremetal: ../templates/baremetal.yml.j2
 exports:
   env:
     - name: MINIMAL_ENDPOINT
       value: https://minimal.local
-storage:
-  - name: data
-    path: /var/lib/minimal
+mounts:
+  persistent_volumes:
+    - name: data
+      path: /var/lib/minimal
+  ephemeral_mounts: []
 health:
   cmd:
     - /bin/sh

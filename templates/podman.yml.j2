@@ -1,3 +1,28 @@
+{% set mounts_config = mounts | default({}) %}
+{% set ephemeral_mounts = mounts_config.ephemeral_mounts | default([]) %}
+{% set default_apply_targets = ['docker', 'podman', 'kubernetes', 'proxmox', 'baremetal'] %}
+{% set security = service_security | default({}) %}
+{% set default_run_user = security.run_as_user if security.run_as_user is defined else 65532 %}
+{% set default_run_group = security.run_as_group if security.run_as_group is defined else default_run_user %}
+{% set quadlet_user = security.user if security.user is defined else ((default_run_user | string) ~ ':' ~ (default_run_group | string)) %}
+{% set read_only_root = security.read_only_root_filesystem if security.read_only_root_filesystem is defined else true %}
+{% set drop_caps_default = security.capabilities_drop | default(['ALL']) %}
+{% if drop_caps_default is string %}{% set drop_caps_default = [drop_caps_default] %}{% endif %}
+{% set no_new_privs = security.no_new_privileges if security.no_new_privileges is defined else true %}
+{% set bounding_set = security.capability_bounding_set if security.capability_bounding_set is defined else [] %}
+{% if bounding_set is string %}{% set bounding_set = [bounding_set] %}{% endif %}
+{% set podman_tmpfs = namespace(items=[]) %}
+{% for mount in ephemeral_mounts %}
+  {% set apply_targets = mount.apply_to | default(default_apply_targets) %}
+  {% if 'podman' in apply_targets %}
+    {% set options = [] %}
+    {% if mount.size is defined %}{% set _ = options.append('size=' ~ mount.size) %}{% endif %}
+    {% if mount.mode is defined %}{% set _ = options.append('mode=' ~ mount.mode) %}{% endif %}
+    {% set entry = mount.path %}
+    {% if options %}{% set entry = entry ~ ':' ~ options | join(',') %}{% endif %}
+    {% if entry not in podman_tmpfs.items %}{% set _ = podman_tmpfs.items.append(entry) %}{% endif %}
+  {% endif %}
+{% endfor %}
 {% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] %}
 {% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
 {% set quadlet_scope_value = quadlet_scope | default('system') %}
@@ -21,6 +46,12 @@ Wants=network-online.target
 Image={{ service_image }}
 ContainerName={{ service_name | default(service_id) }}
 AutoUpdate={{ auto_update_mode }}
+User={{ quadlet_user }}
+ReadOnly={{ 'true' if read_only_root else 'false' }}
+NoNewPrivileges={{ 'true' if no_new_privs else 'false' }}
+{% for cap in drop_caps_default %}
+DropCapability={{ cap }}
+{% endfor %}
 {% for env in inline_env %}
 Environment={{ env.name }}={{ env.value }}
 {% endfor %}
@@ -37,6 +68,9 @@ Volume={{ vol.source | default(vol.name) }}.volume:{{ vol.target }}:{% if vol.mo
 {% for secret in file_secrets %}
 Volume={{ secret_dir }}/{{ secret.name }}:{{ secret.target | default('/run/secrets/' ~ secret.name) }}:ro,Z
 {% endfor %}
+{% for entry in podman_tmpfs.items %}
+Tmpfs={{ entry }}
+{% endfor %}
 {% for port in ports %}
 PublishPort={{ port.host_ip | default('') }}{% if port.host_ip is defined and port.host_ip | string | length > 0 %}:{% endif %}{{ port.published | default(port.target) }}:{{ port.target }}{% if port.protocol is defined %}/{{ port.protocol }}{% endif %}
 {% endfor %}
@@ -48,6 +82,12 @@ HealthRetries={{ health.retries | default(3) }}
 [Service]
 Restart=always
 TimeoutStartSec=900
+NoNewPrivileges={{ 'yes' if no_new_privs else 'no' }}
+{% if bounding_set %}
+CapabilityBoundingSet={{ bounding_set | join(' ') }}
+{% else %}
+CapabilityBoundingSet=
+{% endif %}
 
 [Install]
 WantedBy=multi-user.target default.target
