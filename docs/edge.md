@@ -23,6 +23,29 @@ service, but the three keys above are required for the stock roles. The
 `edge_ingress` role consolidates those exports into `edge_ingress_backends`, a
 normalised structure consumed by the runtime-specific edge roles.
 
+### `exports.env` examples
+
+Common services can share a predictable layout so adapters stay generic. These
+snippets show how the contract looks for two workloads:
+
+```dotenv
+# redis/exports.env
+APP_FQDN=redis.internal.example
+APP_PORT=6379
+APP_BACKEND_IP=10.10.15.23
+```
+
+```dotenv
+# erpnext/exports.env
+APP_FQDN=erp.internal.example
+APP_PORT=8080
+APP_BACKEND_IP=10.10.19.41
+APP_PATH_PREFIX=/desk
+```
+
+The same pattern applies to every service—no runtime-specific wiring is
+required.
+
 Example inventory snippet combining dependency exports with additional metadata:
 
 ```yaml
@@ -85,7 +108,8 @@ Configures the OPNsense Nginx plugin using the same ingress model. Upstreams map
 directly to backend services and Nginx server blocks bind to the declared edge
 addresses. TLS certificate identifiers can be supplied via
 `opnsense_nginx_tls_certificate_id`. The role pushes the configuration through
-`/api/nginx/service/bulkImport` and optionally reconfigures Nginx.
+`/api/nginx/service/bulkImport` and optionally reconfigures Nginx when
+`opnsense_nginx_apply_changes` is true (default).
 
 ### `edge_opnsense_caddy`
 
@@ -94,7 +118,7 @@ bindings follow `opnsense_ingress_bind_addresses` and each route becomes a
 reverse-proxy handle that targets the exported backend dial address. TLS SNI
 policies are emitted automatically when the contract references pre-provisioned
 secrets. Configuration is sent to `/api/caddy/service/bulkImport` and activated
-when `opnsense_caddy_apply_changes` is true.
+when `opnsense_caddy_apply_changes` is true (default).
 
 ### `edge_pfsense`
 
@@ -103,7 +127,7 @@ Backends and frontends mirror the OPNsense semantics: backends define one
 server per workload with HTTP health checks, and frontends bind to the declared
 listen addresses with host/path matchers. A follow-up call to
 `/api/v1/services/haproxy/apply` commits the change when
-`pfsense_apply_changes` is enabled.
+`pfsense_apply_changes` is enabled (default).
 
 ### `edge_pfsense_squid`
 
@@ -111,7 +135,8 @@ Drives the pfSense Squid reverse-proxy API to publish backend services without
 manual configuration drift. Each ingress backend becomes a Squid origin peer and
 an associated reverse-proxy mapping keyed by FQDN and path prefix. The
 configuration posts to `/api/v1/services/squid/reverse_proxy` and applies with
-the standard `/api/v1/services/squid/apply` endpoint.
+the standard `/api/v1/services/squid/apply` endpoint when
+`pfsense_squid_apply_changes` is true (default).
 
 ### `edge_proxy_traefik`
 
