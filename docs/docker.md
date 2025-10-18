@@ -4,7 +4,7 @@ Deploy services using Docker Compose with secret-aware environment files and Com
 
 ## What's new
 
-- Secrets defined in the service contract populate a dedicated `./<hostname>.env` file; sensitive values no longer appear inline.
+- Secrets defined in the service contract populate a dedicated `./<service>.env` file; sensitive values no longer appear inline.
 - File-based secrets render into `secrets/` and are attached via Compose `secrets` blocks.
 - `community.docker.docker_compose_v2` drives deployments to align with the modern Docker CLI plugin.
 - Health probes come directly from `health.cmd` ensuring parity with other runtimes.
@@ -24,44 +24,44 @@ docker compose version
 
 ## Template highlights
 
-`templates/docker.yml.j2` now outputs:
+`templates/docker.yml.j2` renders a service similar to the bundled sample:
 
 ```yaml
 version: '3.8'
 
 services:
-  mariadb:
-    image: mariadb:10.11
-    container_name: mariadb-sample
+  sample-service:
+    image: docker.io/library/nginx:1.27
+    container_name: sample-service
     restart: unless-stopped
     env_file:
-      - ./mariadb-sample.env
+      - ./sample-service.env
     environment:
-      MYSQL_DATABASE: sampledb
-      MYSQL_USER: sample
+      APP_MODE: production
+      APP_FEATURE_FLAG: "true"
     volumes:
-      - mariadb-data:/var/lib/mysql
+      - sample-service-config:/etc/sample-service
     ports:
-      - "192.0.2.50:3306:3306"
+      - "192.0.2.50:8080:8080"
     networks:
       - app-network
     healthcheck:
-      test: ["mysqladmin", "ping", "-h", "127.0.0.1", "-P", "3306"]
+      test: ["/bin/sh", "-c", "exit 0"]
       interval: 10s
       timeout: 5s
       retries: 3
     secrets:
-      - source: ca-cert
-        target: /etc/mysql/certs/ca.pem
+      - source: tls-cert
+        target: /etc/sample-service/certs/tls.crt
         mode: '0400'
 
 volumes:
-  mariadb-data:
+  sample-service-config:
     driver: local
 
 secrets:
-  ca-cert:
-    file: ./secrets/ca-cert
+  tls-cert:
+    file: ./secrets/tls-cert
 
 networks:
   app-network:
@@ -72,14 +72,15 @@ networks:
 
 - `secrets.env` entries feed the env file.
 - `secrets.files` entries create files in `secrets/<name>` and populate the Compose `secrets` map.
-- `mariadb_ip` controls host binding; avoid `0.0.0.0` unless firewalled.
+- `secrets.shred_after_apply` removes rendered secrets after deployment when set to `true`.
+- `service_ports` control host bindings; publish only the ports you intend to expose.
 
 ## Validating the render
 
 After running `ansible-playbook tests/render.yml -e runtime=docker`, verify the manifest:
 
 ```bash
-docker compose -f /tmp/ansible-runtime/mariadb/docker.yml config
+docker compose -f /tmp/ansible-runtime/sample-service/docker.yml config
 ```
 
 ## Deployment with Ansible
@@ -88,10 +89,11 @@ docker compose -f /tmp/ansible-runtime/mariadb/docker.yml config
 
 1. Builds the env file and optional `secrets/` directory under the render output.
 2. Invokes `community.docker.docker_compose_v2` with `pull: always` to keep images fresh.
-3. Sets `service_ip` for the unified health gate.
+3. Optionally shreds rendered secrets when `secrets.shred_after_apply` is enabled.
+4. Sets `service_ip` for the unified health gate.
 
 Use the shared health command to run a post-deploy verification:
 
 ```bash
-ansible-playbook playbooks/deploy-mariadb.yml -e runtime=docker -e "health.cmd=['mysqladmin','ping','-h','192.0.2.50']"
+ansible-playbook playbooks/deploy-sample.yml -e runtime=docker -e "health.cmd=['/bin/sh','-c','exit 0']"
 ```

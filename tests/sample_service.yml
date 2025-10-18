@@ -1,34 +1,33 @@
-service_id: example-db
-service_name: example-db
-service_unit_name: example-db
-service_image: docker.io/library/mariadb:10.11
-version: "10.11"
+service_id: sample-service
+service_name: sample-service
+service_unit_name: sample-service
+service_image: docker.io/library/nginx:1.27
+version: "1.27"
 service_ip: 192.0.2.50
 service_ports:
-  - target: 3306
-    published: 3306
+  - target: 8080
+    published: 8080
     host_ip: 192.0.2.50
 service_env:
-  - name: MYSQL_DATABASE
-    value: sampledb
-  - name: MYSQL_USER
-    value: sample
+  - name: APP_MODE
+    value: production
+  - name: APP_FEATURE_FLAG
+    value: "true"
 service_volumes:
-  - name: data
-    source: example-db-data
-    target: /var/lib/mysql
+  - name: config
+    source: sample-service-config
+    target: /etc/sample-service
     driver: local
 service_packages:
-  - mariadb-server
-  - mariadb-client
+  - nginx
 service_files:
-  - path: /etc/example-db/config.env
+  - path: /etc/sample-service/runtime.env
     mode: '0640'
     content: |
-      MYSQL_DATABASE=sampledb
-      MYSQL_USER=sample
+      APP_MODE=production
+      APP_FEATURE_FLAG=true
 service_services:
-  - name: example-db
+  - name: sample-service
     enabled: true
     state: started
 service_commands:
@@ -38,13 +37,13 @@ service_resources:
   cpu_cores: 1
 service_namespace: sample
 service_replicas: 1
-service_storage_gb: 10
+service_storage_gb: 5
 service_gateway: 192.0.2.1
 service_container:
   vmid: 200
-  hostname: example-db
+  hostname: sample-service
   ostemplate: local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst
-  disk: 10
+  disk: 5
   cores: 1
   memory: 512
   swap: 512
@@ -57,19 +56,19 @@ service_container:
   features: nesting=1,keyctl=1
 exports:
   env:
-    - name: DATABASE_HOST
-      value: 192.0.2.50
+    - name: SAMPLE_SERVICE_URL
+      value: https://sample-service.internal
+      description: Base URL for dependent services
+    - name: SAMPLE_SERVICE_PORT
+      value: "8080"
 storage:
-  - name: data
-    path: /var/lib/mysql
+  - name: config
+    path: /etc/sample-service
 health:
   cmd:
-    - mysqladmin
-    - ping
-    - -h
-    - 127.0.0.1
-    - -P
-    - "3306"
+    - /bin/sh
+    - -c
+    - "exit 0"
   interval: 10s
   timeout: 5s
   retries: 3
@@ -80,13 +79,12 @@ runtime_templates:
   kubernetes: templates/kubernetes.yml.j2
   baremetal: templates/baremetal.yml.j2
 secrets:
+  shred_after_apply: false
   env:
-    - name: MYSQL_ROOT_PASSWORD
-      value: sample-root
-    - name: MYSQL_PASSWORD
-      value: sample-user
+    - name: SAMPLE_SERVICE_TOKEN
+      value: super-secret-token
   files:
-    - name: ca-cert
-      value: "-----BEGIN CERTIFICATE-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA\n-----END CERTIFICATE-----"
-      target: /etc/example-db/certs/ca.pem
+    - name: tls-cert
+      value: "-----BEGIN CERTIFICATE-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtestcertificate\n-----END CERTIFICATE-----"
+      target: /etc/sample-service/certs/tls.crt
       mode: '0400'

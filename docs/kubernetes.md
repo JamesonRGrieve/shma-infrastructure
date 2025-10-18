@@ -22,9 +22,9 @@ ansible-galaxy collection install kubernetes.core
 `templates/kubernetes.yml.j2` emits:
 
 - `Secret` – named `<service_id>-secrets`, containing keys for every `secrets.env` entry plus file secrets.
-- `PersistentVolumeClaim` – sized via `mariadb_storage_gb`.
+- `PersistentVolumeClaim` – sized from `service_storage_gb` or `service_storage_size`.
 - `Deployment` – references the Secret for env vars, mounts secret files, and configures probes/resources.
-- `Service` – cluster-internal exposure on port 3306.
+- `Service` – exposes declared `service_ports` within the cluster.
 
 Snippet:
 
@@ -32,30 +32,30 @@ Snippet:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mariadb
+  name: sample-service
 spec:
   template:
     spec:
       containers:
-        - name: mariadb
+        - name: sample-service
           env:
-            - name: MYSQL_ROOT_PASSWORD
+            - name: SAMPLE_SERVICE_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: mariadb-secrets
-                  key: MYSQL_ROOT_PASSWORD
+                  name: sample-service-secrets
+                  key: SAMPLE_SERVICE_TOKEN
           volumeMounts:
             - name: secret-files
-              mountPath: /etc/mysql/certs/ca.pem
-              subPath: ca-cert
+              mountPath: /etc/sample-service/certs/tls.crt
+              subPath: tls-cert
               readOnly: true
           livenessProbe:
             exec:
-              command: ["mysqladmin", "ping", "-h", "127.0.0.1", "-P", "3306"]
+              command: ["/bin/sh", "-c", "exit 0"]
             periodSeconds: 10
           readinessProbe:
             exec:
-              command: ["mysqladmin", "ping", "-h", "127.0.0.1", "-P", "3306"]
+              command: ["/bin/sh", "-c", "exit 0"]
             initialDelaySeconds: 10
             periodSeconds: 10
 ```
@@ -66,11 +66,11 @@ Render and validate locally:
 
 ```bash
 ansible-playbook tests/render.yml -e runtime=kubernetes -e @tests/sample_service.yml
-kubectl apply --dry-run=client --validate=true -f /tmp/ansible-runtime/mariadb/kubernetes.yml
+kubectl apply --dry-run=client --validate=true -f /tmp/ansible-runtime/sample-service/kubernetes.yml
 ```
 
 ## Deployment tips
 
 - Ensure the referenced namespace (`k8s_namespace`) exists before applying.
-- Consider separate Secrets when mounting large binary blobs; the template can be extended by adding entries to `secrets.files`.
-- Adjust `mariadb_replicas` to scale deployments and rely on the readiness probe before routing traffic.
+- Consider separate Secrets when mounting large binary blobs; extend `secrets.files` as needed.
+- Adjust `service_replicas` to scale deployments and rely on the readiness probe before routing traffic.

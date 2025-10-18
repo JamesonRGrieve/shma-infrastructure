@@ -1,14 +1,13 @@
 # Proxmox LXC Deployment Guide
 
-Deploy services as LXC containers on Proxmox VE with predictable networking and hardened MariaDB defaults.
+Deploy services as LXC containers on Proxmox VE with predictable networking and runtime-agnostic provisioning.
 
 ## Key changes
 
-- Templates now emit `container_ip`, removing brittle IP parsing in Ansible tasks.
+- Templates emit `container_ip`, removing brittle IP parsing in Ansible tasks.
 - LXC containers declare `features: nesting=1,keyctl=1` so Docker/Podman workloads function inside the guest when required.
 - Ansible waits for SSH on `container_ip` (120 seconds) before running delegate tasks.
-- Package installation inside the container uses non-interactive APT and triggers handlers when configuration files change.
-- MariaDB is configured with Ansible modules instead of shell, binding to the container IP and granting access only to `mariadb_allowed_hosts`.
+- Package installation inside the container uses non-interactive APT and applies any rendered configuration or command hooks.
 
 ## Prerequisites
 
@@ -21,23 +20,23 @@ Deploy services as LXC containers on Proxmox VE with predictable networking and 
 ### Ansible collections
 
 ```bash
-ansible-galaxy collection install community.general community.mysql
+ansible-galaxy collection install community.general
 ```
 
-`community.mysql` provides the `mysql_user` and `mysql_db` modules used during provisioning.
+`community.general.proxmox` manages LXC lifecycle actions.
 
 ## Template snippets
 
-`templates/proxmox.yml.j2` now produces:
+`templates/proxmox.yml.j2` produces output similar to:
 
 ```yaml
 ---
 container_ip: "192.0.2.50"
 container:
   vmid: "200"
-  hostname: "mariadb"
+  hostname: "sample-service"
   ostemplate: "local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst"
-  disk: "10"
+  disk: "5"
   cores: "1"
   memory: "512"
   swap: "512"
@@ -49,44 +48,36 @@ container:
 
 setup:
   packages:
-    - mariadb-server
-    - mariadb-client
-    - python3-pymysql
+    - nginx
   config:
-    - path: /etc/mysql/mariadb.conf.d/99-custom.cnf
+    - path: /etc/sample-service/runtime.env
       content: |
-        [mysqld]
-        bind-address = 192.0.2.50
-        max_connections = 200
+        APP_MODE=production
+        APP_FEATURE_FLAG=true
+      mode: '0640'
   services:
-    - name: mariadb
+    - name: sample-service
       enabled: true
       state: started
 ```
-
-## Runtime variables
-
-- `mariadb_bind_address` – override the bind address if the container uses multiple interfaces.
-- `mariadb_allowed_hosts` – list of remote hosts granted database access. Defaults to `[container_ip]`; `%` is rejected by the role.
 
 ## Execution flow
 
 1. Render the template (see `tests/render.yml`).
 2. `roles/common/apply_runtime/tasks/proxmox.yml`:
-   - Creates/starts the container with the declared features.
-   - Waits for `container_ip:22`.
-   - Installs packages via non-interactive APT.
-   - Copies config files and notifies the shared handler to restart MariaDB when changed.
-   - Enables systemd services defined in `setup.services`.
-   - Uses `community.mysql` modules to secure the root account, create the database, and grant users access to the specified hosts.
+   - Creates or updates the container with the declared features.
+   - Waits for SSH on `container_ip:22`.
+   - Installs packages via non-interactive APT when requested.
+   - Copies configuration files and enables systemd services declared in `setup.services`.
+   - Runs any additional shell commands listed in `setup.commands` inside the guest.
 
 ## Security notes
 
-- MariaDB binds to the LXC IP instead of `0.0.0.0`.
-- Database users must be explicitly listed in `mariadb_allowed_hosts`.
-- Use Proxmox firewall rules or host-level filtering if exposing the port beyond the bridge.
+- Explicit IP assignments keep host firewalls predictable.
+- Use Proxmox firewall rules or host-level filtering for exposed ports.
+- Keep `features` minimal; remove `nesting` when containerized workloads are not required.
 
 ## Troubleshooting
 
-- **Handler not firing** – ensure templates write to `/etc/mysql/mariadb.conf.d/99-custom.cnf`. The handler listens on `Restart MariaDB`.
-- **Delegation errors** – confirm `container_ip` resolves and SSH is reachable. Increase the `wait_for` timeout if provisioning a large template.
+- **Delegation errors** – confirm `container_ip` resolves and SSH is reachable. Increase the `wait_for` timeout for large templates.
+- **Package installation failures** – ensure the container has outbound network access and `DEBIAN_FRONTEND=noninteractive` is accepted.
