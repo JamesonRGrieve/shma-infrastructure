@@ -90,14 +90,16 @@
     group: root
     mode: '0440'
   notify: Validate sudoers configuration
-  when: hardening_enable_cockpit
+  when:
+    - hardening_enable_cockpit
+    - hardening_cockpit_passwordless_sudo
 
 - name: Remove sudo cockpit exception when disabled
   ansible.builtin.file:
     path: /etc/sudoers.d/cockpit
     state: absent
   notify: Validate sudoers configuration
-  when: not hardening_enable_cockpit
+  when: not (hardening_enable_cockpit and hardening_cockpit_passwordless_sudo)
 
 - name: Ensure cockpit socket override directory exists when enabled
   ansible.builtin.file:

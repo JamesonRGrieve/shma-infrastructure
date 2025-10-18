@@ -4,7 +4,7 @@ hardening_authorized_users: []  # list of {name: user, key: ssh-rsa ...}
 hardening_fail2ban_maxretry: 3
 hardening_fail2ban_bantime: 3600
 hardening_fail2ban_findtime: 600
-hardening_enable_ipv6: false
+hardening_enable_ipv6: true
 hardening_weekly_aide_check_minute: 0
 hardening_weekly_aide_check_hour: 3
 hardening_weekly_aide_check_day: 1
@@ -42,6 +42,7 @@ hardening_firewalld_ports: []
 hardening_enable_cockpit: false
 hardening_cockpit_listen_address: 127.0.0.1
 hardening_cockpit_allowed_sources: []
+hardening_cockpit_passwordless_sudo: false
 hardening_requiretty_exempt_users: []
 hardening_security_tool_logrotate_frequency: weekly
 hardening_security_tool_logrotate_rotate: 8

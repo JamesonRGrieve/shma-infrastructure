@@ -31,14 +31,6 @@
     {% set feature_ns.value = '' %}
   {% endif %}
 {% endif %}
-{% if feature_ns.value is none %}
-  {% set nested_indicators = ['docker', 'docker-ce', 'docker.io', 'podman', 'podman-docker', 'containerd', 'buildah'] %}
-  {% for indicator in nested_indicators %}
-    {% if indicator in pkg_names.items %}
-      {% set feature_ns.value = 'nesting=1,keyctl=1' %}
-    {% endif %}
-  {% endfor %}
-{% endif %}
 container_ip: "{{ service_ip }}"
 container:
   vmid: "{{ container.vmid | default(service_id) }}"

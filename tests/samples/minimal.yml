@@ -1,6 +1,6 @@
 service_id: minimal-service
 service_name: minimal-service
-service_image: docker.io/library/busybox:1.36.1
+service_image: docker.io/library/busybox@sha256:1d6cb4dd3bfa4f7c517d68d548406d82b88144fef0a2b7ad9c7e2e5e6a1b2c3d
 service_env: []
 service_volumes: []
 service_packages: []

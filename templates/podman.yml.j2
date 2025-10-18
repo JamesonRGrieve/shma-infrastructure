@@ -11,6 +11,7 @@
 {% set ports = service_ports | default((service_port is defined) | ternary([service_port], [])) %}
 {% set volumes = service_volumes | default([]) %}
 {% set inline_env = service_env | default([]) %}
+{% set auto_update_mode = quadlet_auto_update | default('none') %}
 [Unit]
 Description={{ service_unit_description | default('Managed container for ' ~ (service_name | default(service_id))) }}
 After=network-online.target
@@ -19,7 +20,7 @@ Wants=network-online.target
 [Container]
 Image={{ service_image }}
 ContainerName={{ service_name | default(service_id) }}
-AutoUpdate=registry
+AutoUpdate={{ auto_update_mode }}
 {% for env in inline_env %}
 Environment={{ env.name }}={{ env.value }}
 {% endfor %}
@@ -27,7 +28,11 @@ Environment={{ env.name }}={{ env.value }}
 EnvironmentFile={{ env_file_path }}
 {% endif %}
 {% for vol in volumes %}
+{% if vol.host_path is defined %}
+Volume={{ vol.host_path }}:{{ vol.target }}:{% if vol.mode is defined %}{{ vol.mode }}{% else %}Z{% endif %}
+{% else %}
 Volume={{ vol.source | default(vol.name) }}.volume:{{ vol.target }}:{% if vol.mode is defined %}{{ vol.mode }}{% else %}Z{% endif %}
+{% endif %}
 {% endfor %}
 {% for secret in file_secrets %}
 Volume={{ secret_dir }}/{{ secret.name }}:{{ secret.target | default('/run/secrets/' ~ secret.name) }}:ro,Z

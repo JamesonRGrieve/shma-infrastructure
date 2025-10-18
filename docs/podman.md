@@ -8,6 +8,8 @@ Deploy services using Podman Quadlets with environment files, optional user scop
 - Secrets from the contract populate an environment file and optional `secrets/` directory, mounted read-only into the container.
 - Health checks map directly to `HealthCmd/HealthInterval/HealthTimeout/HealthRetries` derived from `health.cmd`.
 - Host policy defaults to rejecting unsigned/unknown registries and the local Docker engine, keeping pulls scoped to approved sources.
+- `service_volumes.host_path` entries render as direct bind mounts so containers remain ephemeral while state lives on the host.
+- `service_image` entries should be digest-pinned; combine with `quadlet_auto_update: none` to ensure only vetted images run.
 
 ## Requirements
 
@@ -33,13 +35,13 @@ After=network-online.target
 Wants=network-online.target
 
 [Container]
-Image=docker.io/library/nginx:1.27
+Image=docker.io/library/nginx@sha256:2ed85f18cb2c6b49e191bcb6bf12c0c07d63f3937a05d9f5234170d4f8df5c94
 ContainerName=sample-service
-AutoUpdate=registry
+AutoUpdate=none
 Environment=APP_MODE=production
 Environment=APP_FEATURE_FLAG=true
 EnvironmentFile=/etc/containers/systemd/sample-service.env
-Volume=sample-service-config.volume:/etc/sample-service:Z
+Volume=/srv/sample-service/config:/etc/sample-service:Z
 PublishPort=192.0.2.50:8080:8080
 Volume=/etc/containers/systemd/secrets/tls-cert:/etc/sample-service/certs/tls.crt:ro,Z
 HealthCmd=/bin/sh -c exit 0
@@ -67,6 +69,8 @@ For `quadlet_scope: user`, the environment file and secrets live under `~/.confi
 4. Executes `systemd` tasks with the correct scope and reloads daemons.
 5. Shreds rendered secrets by default; set `secrets.shred_after_apply: false` only when you need to retain them for debugging.
 6. Sets `service_ip` for the post-deploy health gate.
+
+Control automatic image refreshes with `quadlet_auto_update`. The default `none` avoids surprise upgrades; set it to `registry` only when you have a signing/rollout process that validates digests in CI first.
 
 Ensure lingering is enabled when deploying user-scoped units:
 
