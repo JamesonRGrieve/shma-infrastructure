@@ -1,0 +1,105 @@
+---
+- name: Ensure OPNsense API credentials are provided for Caddy
+  ansible.builtin.assert:
+    that:
+      - opnsense_caddy_api_key | length > 0
+      - opnsense_caddy_api_secret | length > 0
+    fail_msg: "opnsense_caddy_api_key and opnsense_caddy_api_secret must be provided to configure OPNsense Caddy"
+
+- name: Initialize OPNsense Caddy payload containers
+  ansible.builtin.set_fact:
+    opnsense_caddy_routes: []
+    opnsense_caddy_listeners: []
+    opnsense_caddy_tls_policies: []
+
+- name: Build Caddy listener list
+  ansible.builtin.set_fact:
+    opnsense_caddy_listeners: "{{ (opnsense_caddy_listeners + [ listener_entry ]) | unique }}"
+  loop: "{{ opnsense_ingress_bind_addresses | default([{'address': '0.0.0.0', 'port': 80, 'tls': false}, {'address': '0.0.0.0', 'port': 443, 'tls': true}]) }}"
+  loop_control:
+    loop_var: bind
+  vars:
+    listener_entry: "{{ bind.address | string }}:{{ bind.port | string }}"
+
+- name: Build OPNsense Caddy routes
+  ansible.builtin.set_fact:
+    opnsense_caddy_routes: "{{ opnsense_caddy_routes + [ route_payload ] }}"
+    opnsense_caddy_tls_policies: "{{ opnsense_caddy_tls_policies + (edge_backend.tls | default(False) | ternary([tls_policy], [])) }}"
+  loop: "{{ edge_ingress_backends | default([]) }}"
+  loop_control:
+    loop_var: edge_backend
+  vars:
+    include_path: {{ edge_backend.path_prefix is defined and edge_backend.path_prefix not in [None, ''] and edge_backend.path_prefix != '/' }}
+    match_base: >-
+      {{ {
+        'host': [edge_backend.exports.APP_FQDN]
+      } | to_json | from_json }}
+    match_block: >-
+      {{ (match_base | combine({'path': [edge_backend.path_prefix]})) if include_path else match_base }}
+    upstream_entry: >-
+      {{ {
+        'dial': edge_backend.exports.APP_BACKEND_IP ~ ':' ~ (edge_backend.exports.APP_PORT | string)
+      } | to_json | from_json }}
+    route_payload: >-
+      {{ {
+        'match': [match_block],
+        'handle': [
+          {
+            'handler': 'reverse_proxy',
+            'upstreams': [upstream_entry]
+          }
+        ],
+        'terminal': True
+      } | to_json | from_json }}
+    tls_policy: >-
+      {{ {
+        'match': {
+          'sni': [edge_backend.exports.APP_FQDN]
+        }
+      } | to_json | from_json }}
+
+- name: Assemble Caddy configuration
+  ansible.builtin.set_fact:
+    opnsense_caddy_configuration: >-
+      {{ {
+        'apps': {
+          'http': {
+            'servers': {
+              'ingress': {
+                'listen': opnsense_caddy_listeners,
+                'routes': opnsense_caddy_routes,
+                'tls_connection_policies': (opnsense_caddy_tls_policies | unique)
+              }
+            }
+          }
+        }
+      } | to_json | from_json }}
+
+- name: Push Caddy configuration to OPNsense
+  ansible.builtin.uri:
+    url: "{{ opnsense_caddy_api_scheme }}://{{ opnsense_caddy_api_host }}:{{ opnsense_caddy_api_port }}/api/caddy/service/bulkImport"
+    method: POST
+    user: "{{ opnsense_caddy_api_key }}"
+    password: "{{ opnsense_caddy_api_secret }}"
+    force_basic_auth: true
+    validate_certs: "{{ opnsense_caddy_api_verify_ssl }}"
+    body_format: json
+    status_code: 200
+    body:
+      configuration: {{ opnsense_caddy_configuration }}
+  register: opnsense_caddy_import
+  no_log: true
+
+- name: Apply Caddy configuration on OPNsense
+  when: opnsense_caddy_apply_changes | bool
+  ansible.builtin.uri:
+    url: "{{ opnsense_caddy_api_scheme }}://{{ opnsense_caddy_api_host }}:{{ opnsense_caddy_api_port }}/api/caddy/service/reconfigure"
+    method: POST
+    user: "{{ opnsense_caddy_api_key }}"
+    password: "{{ opnsense_caddy_api_secret }}"
+    force_basic_auth: true
+    validate_certs: "{{ opnsense_caddy_api_verify_ssl }}"
+    status_code: 200
+    body_format: json
+    body: {}
+  no_log: true

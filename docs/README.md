@@ -117,7 +117,9 @@ The registry keeps validation decoupled from the Ansible inventory while ensurin
 - `hardening_enable_cockpit` – opt-in toggle that installs Cockpit, binds it to `hardening_cockpit_listen_address` (defaults to `127.0.0.1`), and optionally opens UFW 9090 to the addresses listed in `hardening_cockpit_allowed_sources`.
 - `hardening_cockpit_passwordless_sudo` – defaults to `false`. Enable only if Cockpit must issue privileged commands without prompting.
 - `hardening_enable_ipv6` – defaults to `true`, keeping dual-stack networks intact. Disable only when upstream networking prohibits IPv6 entirely.
-- `edge_ingress_contracts` – list of ingress exports the edge roles consume. Pair with one or more `edge_proxy_*`, `edge_opnsense`, or `edge_pfsense` roles to automate reverse proxies and firewall HAProxy instances.
+- `system_hardening_allowed_ports` – list of `port/protocol` entries (for example `443/tcp`) that should stay reachable after the
+  firewall defaults to a deny-first policy.
+- `edge_ingress_contracts` – list of ingress exports the edge roles consume. Pair with one or more `edge_proxy_*`, `edge_opnsense*`, or `edge_pfsense*` roles to automate reverse proxies (Traefik, HAProxy, Nginx, Caddy) and firewall integrations (HAProxy and Squid).
 
 ## Continuous Integration
 

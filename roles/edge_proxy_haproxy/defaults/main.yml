@@ -5,6 +5,7 @@ haproxy_config_group: wheel
 haproxy_config_mode: "0640"
 haproxy_service_name: haproxy
 haproxy_reload_command: "service {{ haproxy_service_name }} reload"
+haproxy_validate_command: "haproxy -c -f {{ haproxy_config_path }}"
 haproxy_bind_http: true
 haproxy_http_bind_address: "*:80"
 haproxy_bind_https: false

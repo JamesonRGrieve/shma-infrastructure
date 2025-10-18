@@ -1,0 +1,7 @@
+---
+pfsense_squid_api_scheme: "{{ pfsense_api_scheme | default('https') }}"
+pfsense_squid_api_host: "{{ pfsense_api_host | default(inventory_hostname) }}"
+pfsense_squid_api_port: "{{ pfsense_api_port | default(443) }}"
+pfsense_squid_api_token: "{{ pfsense_api_token | default('') }}"
+pfsense_squid_api_verify_ssl: "{{ pfsense_api_verify_ssl | default(true) }}"
+pfsense_squid_apply_changes: "{{ pfsense_apply_changes | default(true) }}"

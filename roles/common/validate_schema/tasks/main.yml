@@ -73,6 +73,134 @@
   loop: "{{ requires | default([]) }}"
   when: requires is defined and requires | length > 0
 
+- name: Validate secret environment values are not placeholders
+  assert:
+    that:
+      - not (item.value | default('') | lower).startswith('change-me-')
+    fail_msg: >-
+      Secret {{ item.name | default('<unnamed>') }} retains placeholder value
+      "change-me-*". Provide a real secret before applying.
+  loop: "{{ secrets.env | default([]) }}"
+  loop_control:
+    label: "{{ item.name | default('<unnamed>') }}"
+  when: secrets is defined and secrets.env is defined and secrets.env | length > 0
+
+- name: Validate secret file contents are not placeholders
+  assert:
+    that:
+      - not ((item.value | default(item.content | default(''))) | lower).startswith('change-me-')
+    fail_msg: >-
+      Secret file {{ item.name | default('<unnamed>') }} retains placeholder value
+      "change-me-*". Replace it with the real secret payload.
+  loop: "{{ secrets.files | default([]) }}"
+  loop_control:
+    label: "{{ item.name | default('<unnamed>') }}"
+  when: secrets is defined and secrets.files is defined and secrets.files | length > 0
+
+- name: Validate ingress route keys are allowed
+  assert:
+    that:
+      - (item.keys() | list | difference(ingress_allowed_route_keys)) | length == 0
+    fail_msg: >-
+      Ingress route for host {{ item.host | default('unknown host') }} contains unsupported keys:
+      {{ (item.keys() | list | difference(ingress_allowed_route_keys)) | join(', ') }}
+  vars:
+    ingress_allowed_route_keys:
+      - host
+      - port
+      - path_prefix
+      - websocket
+      - sticky
+      - health
+      - tls
+      - headers
+      - rate_limit
+      - basic_auth
+      - mtls
+      - allow_http
+  loop: "{{ ingress.routes | default([]) }}"
+  loop_control:
+    label: "{{ item.host | default('route') }}:{{ item.port | default('unknown') }}"
+  when:
+    - ingress is defined
+    - ingress is mapping
+    - ingress.routes is defined
+    - ingress.routes | length > 0
+
+- name: Validate ingress TLS keys are allowed
+  assert:
+    that:
+      - ((item.tls | default({})).keys() | list | difference(ingress_allowed_tls_keys)) | length == 0
+    fail_msg: >-
+      Ingress TLS options for host {{ item.host | default('unknown host') }} include unsupported keys:
+      {{ ((item.tls | default({})).keys() | list | difference(ingress_allowed_tls_keys)) | join(', ') }}
+  vars:
+    ingress_allowed_tls_keys:
+      - mode
+      - hsts
+      - alpn
+      - redirect_http_to_https
+      - acme
+      - certificate_secret
+      - key_secret
+      - chain_secret
+  loop: "{{ ingress.routes | default([]) }}"
+  loop_control:
+    label: "{{ item.host | default('route') }}:{{ item.port | default('unknown') }}"
+  when:
+    - ingress is defined
+    - ingress is mapping
+    - ingress.routes is defined
+    - ingress.routes | length > 0
+    - (item.tls | default({})) is mapping
+
+- name: Validate ingress ACME keys are allowed
+  assert:
+    that:
+      - ((item.tls.acme | default({})).keys() | list | difference(ingress_allowed_acme_keys)) | length == 0
+    fail_msg: >-
+      Ingress ACME options for host {{ item.host | default('unknown host') }} include unsupported keys:
+      {{ ((item.tls.acme | default({})).keys() | list | difference(ingress_allowed_acme_keys)) | join(', ') }}
+  vars:
+    ingress_allowed_acme_keys:
+      - challenge
+      - dns_provider
+      - email
+      - wildcard
+      - eab_kid
+      - eab_hmac_key
+  loop: "{{ ingress.routes | default([]) }}"
+  loop_control:
+    label: "{{ item.host | default('route') }}:{{ item.port | default('unknown') }}"
+  when:
+    - ingress is defined
+    - ingress is mapping
+    - ingress.routes is defined
+    - ingress.routes | length > 0
+    - item.tls is defined
+    - item.tls.acme is defined
+
+- name: Validate ingress headers keys are allowed
+  assert:
+    that:
+      - ((item.headers | default({})).keys() | list | difference(ingress_allowed_headers_keys)) | length == 0
+    fail_msg: >-
+      Ingress headers for host {{ item.host | default('unknown host') }} include unsupported keys:
+      {{ ((item.headers | default({})).keys() | list | difference(ingress_allowed_headers_keys)) | join(', ') }}
+  vars:
+    ingress_allowed_headers_keys:
+      - set
+      - remove
+  loop: "{{ ingress.routes | default([]) }}"
+  loop_control:
+    label: "{{ item.host | default('route') }}:{{ item.port | default('unknown') }}"
+  when:
+    - ingress is defined
+    - ingress is mapping
+    - ingress.routes is defined
+    - ingress.routes | length > 0
+    - (item.headers | default({})) is mapping
+
 - name: Service contract validated
   debug:
     msg: "✓ Service {{ service_id }} contract is valid"

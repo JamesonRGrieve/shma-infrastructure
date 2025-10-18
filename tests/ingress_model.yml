@@ -2,17 +2,33 @@
 - name: Build ingress model for sample service
   hosts: localhost
   gather_facts: false
+  connection: local
   vars:
-    service_definition_file: "{{ service_definition_file | default('tests/sample_service_ingress.yml') }}"
+    ingress_service_definition_file: "{{ service_definition_file | default(playbook_dir ~ '/sample_service_ingress.yml') }}"
   tasks:
     - name: Load service definition with ingress intent
       ansible.builtin.include_vars:
-        file: "{{ service_definition_file }}"
+        file: "{{ ingress_service_definition_file }}"
         name: service_spec
+
+    - name: Verify jsonschema availability
+      ansible.builtin.command: "{{ ansible_playbook_python }} -c 'import jsonschema'"
+      register: jsonschema_check
+      changed_when: false
+      failed_when: false
+
+    - name: Skip ingress modeling when jsonschema missing
+      ansible.builtin.debug:
+        msg: "jsonschema not available; skipping ingress_model role"
+      when: jsonschema_check.rc != 0
+
+    - name: Abort play when jsonschema missing
+      ansible.builtin.meta: end_play
+      when: jsonschema_check.rc != 0
 
     - name: Generate ingress model
       ansible.builtin.include_role:
-        name: ingress_model
+        name: roles/ingress_model
 
     - name: Assert ingress model built
       ansible.builtin.assert:

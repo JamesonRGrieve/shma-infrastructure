@@ -40,6 +40,14 @@
     warn: false
   changed_when: false
 
+- name: Allow published service ports in ufw
+  ansible.builtin.command: "ufw allow {{ item }}"
+  args:
+    warn: false
+  loop: "{{ system_hardening_allowed_ports }}"
+  changed_when: false
+  when: system_hardening_allowed_ports | length > 0
+
 - name: Allow cockpit management access in ufw
   ansible.builtin.command: "ufw allow from {{ item }} to any port 9090 proto tcp"
   args:

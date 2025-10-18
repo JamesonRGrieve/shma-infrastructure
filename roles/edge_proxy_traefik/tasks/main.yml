@@ -14,7 +14,7 @@
     owner: "{{ traefik_config_owner }}"
     group: "{{ traefik_config_group }}"
     mode: "{{ traefik_config_mode }}"
-  notify: Reload Traefik
+  notify: Apply Traefik configuration
 
 - name: Flush handlers if we manage the Traefik service
   meta: flush_handlers
