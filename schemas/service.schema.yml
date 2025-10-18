@@ -194,7 +194,18 @@ properties:
   requires:
     type: array
     items:
-      type: string
+      anyOf:
+        - type: string
+        - type: object
+          required:
+            - name
+          properties:
+            name:
+              type: string
+            version:
+              type: string
+            exports_hash:
+              type: string
   exports:
     type: object
     properties:
