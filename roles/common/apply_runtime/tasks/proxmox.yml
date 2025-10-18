@@ -15,13 +15,21 @@
     container_ip: "{{ lxc_config.container_ip }}"
     service_ip: "{{ lxc_config.container_ip }}"
 
+- name: Require Proxmox API token credentials
+  assert:
+    that:
+      - proxmox_api_token_id is defined
+      - proxmox_api_token_secret is defined
+    fail_msg: "Set proxmox_api_token_id and proxmox_api_token_secret for token-based authentication"
+
 - name: Create LXC container
   community.general.proxmox:
     vmid: "{{ lxc_config.container.vmid }}"
     hostname: "{{ lxc_config.container.hostname }}"
     node: "{{ proxmox_node }}"
     api_user: "{{ proxmox_api_user }}"
-    api_password: "{{ proxmox_api_password }}"
+    api_token_id: "{{ proxmox_api_token_id }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
     api_host: "{{ proxmox_api_host }}"
     ostemplate: "{{ lxc_config.container.ostemplate }}"
     disk: "{{ lxc_config.container.disk }}"
@@ -31,7 +39,7 @@
     netif: "{{ lxc_config.container.netif }}"
     onboot: "{{ lxc_config.container.onboot }}"
     unprivileged: "{{ lxc_config.container.unprivileged }}"
-    features: "{{ lxc_config.container.features | default('nesting=1,keyctl=1') }}"
+    features: {{ lxc_config.container.features | default(omit) }}
     state: present
 
 - name: Start container
@@ -39,7 +47,8 @@
     vmid: "{{ lxc_config.container.vmid }}"
     node: "{{ proxmox_node }}"
     api_user: "{{ proxmox_api_user }}"
-    api_password: "{{ proxmox_api_password }}"
+    api_token_id: "{{ proxmox_api_token_id }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
     api_host: "{{ proxmox_api_host }}"
     state: started
 
@@ -53,11 +62,19 @@
   delegate_to: "{{ container_ip }}"
   become: true
   apt:
-    name: "{{ lxc_config.setup.packages | default([]) }}"
+    name: >-
+      {% if item is mapping %}
+      {{ item.name }}{% if item.version is defined %}={{ item.version }}{% endif %}
+      {% else %}
+      {{ item }}
+      {% endif %}
     state: present
-    update_cache: yes
+    update_cache: {{ lxc_config.setup.update_cache | default(true) | bool }}
   environment:
     DEBIAN_FRONTEND: noninteractive
+  loop: "{{ lxc_config.setup.packages | default([]) }}"
+  loop_control:
+    label: "{{ item.name if item is mapping else item }}"
   when: lxc_config.setup.packages is defined and lxc_config.setup.packages | length > 0
 
 - name: Write config files

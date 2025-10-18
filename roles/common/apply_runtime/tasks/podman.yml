@@ -14,7 +14,7 @@
   set_fact:
     quadlet_secret_env: "{{ secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] }}"
     quadlet_secret_files: "{{ secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] }}"
-    quadlet_secret_shred: "{{ secrets.shred_after_apply | default(false) if secrets is defined else false }}"
+    quadlet_secret_shred: {{ (secrets.get('shred_after_apply', True) if secrets is defined else True) | bool }}
 
 - name: Deduplicate quadlet secret environment variables
   set_fact:

@@ -15,7 +15,7 @@ A runtime-agnostic infrastructure-as-code framework for deploying self-hosted ap
 ### Install toolchain
 
 ```bash
-pip install ansible ansible-lint yamllint jsonschema pyyaml
+python3 -m pip install -r ci/requirements.txt
 ansible-galaxy collection install -r ci/collections-stable.yml
 ```
 
@@ -41,6 +41,8 @@ Every service definition must provide identifiers, runtime templates, health che
 
 ```yaml
 service_id: sample-service
+service_image: registry.example.com/sample/service:1.27
+service_image_digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 runtime_templates:
   docker: templates/docker.yml.j2
   podman: templates/podman.yml.j2
@@ -90,7 +92,8 @@ The registry keeps validation decoupled from the Ansible inventory while ensurin
 ## Additional Options
 
 - `quadlet_scope` – set to `system` (default) or `user` to control where Quadlet units are installed. When using `quadlet_scope: user`, make sure lingering is enabled for the target user or user services are explicitly started at boot.
-- `secrets.shred_after_apply` – remove rendered secret files and env files immediately after the runtime adapter applies changes, leaving only in-memory material behind.
+- `secrets.shred_after_apply` – defaults to `true` and removes rendered secret files and env files immediately after the runtime adapter applies changes, leaving only in-memory material behind.
+- `hardening_enable_cockpit` – opt-in installation of Cockpit packages; when enabled, Cockpit binds to `hardening_cockpit_bind_address` (`127.0.0.1` by default) instead of exposing 9090 broadly.
 
 ## Continuous Integration
 
@@ -99,10 +102,10 @@ The registry keeps validation decoupled from the Ansible inventory while ensurin
 1. Lint YAML (`yamllint`) and Ansible (`ansible-lint`).
 2. Validate `schemas/service.schema.yml` with `jsonschema`.
 3. Render sample manifests for each runtime via `tests/render.yml` and `tests/sample_service.yml`.
-4. Validate the generated artifacts:
+4. Validate the generated artifacts against tooling and a throwaway Kind cluster:
    - `yamllint` for Proxmox config.
    - `docker compose config` for Compose.
    - `systemd-analyze verify` for Quadlet and bare-metal service units.
-   - `kubectl apply --dry-run=client --validate=true` for Kubernetes manifests.
+   - `kubectl apply --dry-run=server --validate=true` for Kubernetes manifests.
 
 Use the same steps locally before submitting changes to keep CI green.

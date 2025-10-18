@@ -3,11 +3,23 @@
   ansible.builtin.set_fact:
     hardening_package_target: "{{ hardening_packages_common.get(ansible_distribution, hardening_packages_common.get(ansible_os_family, [])) }}"
 
+- name: Resolve optional cockpit package set
+  ansible.builtin.set_fact:
+    hardening_cockpit_package_target: "{{ hardening_cockpit_packages.get(ansible_distribution, hardening_cockpit_packages.get(ansible_os_family, [])) }}"
+
 - name: Ensure base hardening packages are installed
   ansible.builtin.package:
     name: "{{ hardening_package_target }}"
     state: present
   when: hardening_package_target | length > 0
+
+- name: Ensure cockpit packages are installed when enabled
+  ansible.builtin.package:
+    name: "{{ hardening_cockpit_package_target }}"
+    state: present
+  when:
+    - hardening_enable_cockpit | bool
+    - hardening_cockpit_package_target | length > 0
 
 - name: Check for existing AIDE database
   ansible.builtin.stat:
@@ -67,16 +79,6 @@
     mode: '0440'
   notify: Validate sudoers configuration
 
-- name: Configure sudo cockpit exception
-  ansible.builtin.copy:
-    dest: /etc/sudoers.d/cockpit
-    content: |-
-      Defaults:cockpit !authenticate
-    owner: root
-    group: root
-    mode: '0440'
-  notify: Validate sudoers configuration
-
 - name: Require TTY for sudo invocations
   ansible.builtin.copy:
     dest: /etc/sudoers.d/requiretty
@@ -121,3 +123,22 @@
     state: stopped
   loop: "{{ (hardening_disable_services + hardening_additional_disable_services) | unique }}"
   ignore_errors: true
+
+- name: Ensure cockpit configuration directory exists
+  ansible.builtin.file:
+    path: /etc/cockpit
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+  when: hardening_enable_cockpit | bool
+
+- name: Constrain cockpit web service bind address
+  ansible.builtin.template:
+    src: cockpit.conf.j2
+    dest: /etc/cockpit/cockpit.conf
+    owner: root
+    group: root
+    mode: '0640'
+  when: hardening_enable_cockpit | bool
+  notify: Restart cockpit

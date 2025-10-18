@@ -8,6 +8,7 @@ Deploy services using Docker Compose with secret-aware environment files and Com
 - File-based secrets render into `secrets/` and are attached via Compose `secrets` blocks.
 - `community.docker.docker_compose_v2` drives deployments to align with the modern Docker CLI plugin.
 - Health probes come directly from `health.cmd` ensuring parity with other runtimes.
+- Container images should be referenced by digest via `service_image` + `service_image_digest`, preventing surprise upgrades.
 
 ## Prerequisites
 
@@ -31,7 +32,7 @@ version: '3.8'
 
 services:
   sample-service:
-    image: docker.io/library/nginx:1.27
+    image: registry.example.com/sample/service:1.27@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
     container_name: sample-service
     restart: unless-stopped
     env_file:
@@ -72,7 +73,7 @@ networks:
 
 - `secrets.env` entries feed the env file.
 - `secrets.files` entries create files in `secrets/<name>` and populate the Compose `secrets` map.
-- `secrets.shred_after_apply` removes rendered secrets after deployment when set to `true`.
+- `secrets.shred_after_apply` defaults to `true`, shredding rendered secrets after deployment unless explicitly disabled.
 - `service_ports` control host bindings; publish only the ports you intend to expose.
 
 ## Validating the render
@@ -89,7 +90,7 @@ docker compose -f /tmp/ansible-runtime/sample-service/docker.yml config
 
 1. Builds the env file and optional `secrets/` directory under the render output.
 2. Invokes `community.docker.docker_compose_v2` with `pull: always` to keep images fresh.
-3. Optionally shreds rendered secrets when `secrets.shred_after_apply` is enabled.
+3. Shreds rendered secrets by default (disable with `secrets.shred_after_apply: false`).
 4. Sets `service_ip` for the unified health gate.
 
 Use the shared health command to run a post-deploy verification:

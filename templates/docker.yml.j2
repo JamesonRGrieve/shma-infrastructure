@@ -1,7 +1,12 @@
+{% set base_image = service_image | default('') %}
+{% set base_image_reference = base_image %}
+{% if service_image_digest is defined %}
+{% set base_image_reference = base_image_reference + '@' + service_image_digest %}
+{% endif %}
 {% set services_list = services | default([{
   'name': service_name | default(service_id),
   'container_name': service_name | default(service_id),
-  'image': service_image,
+  'image': base_image_reference,
   'env': service_env | default([]),
   'ports': service_ports | default((service_port is defined) | ternary([service_port], [])),
   'volumes': service_volumes | default([]),
@@ -15,7 +20,11 @@ version: '3.8'
 services:
 {% for svc in services_list %}
   {{ svc.name }}:
-    image: {{ svc.image }}
+{% set svc_image = svc.image | default(base_image_reference) %}
+{% if svc.image_digest is defined %}
+{% set svc_image = (svc.image | default(base_image)) + '@' + svc.image_digest %}
+{% endif %}
+    image: {{ svc_image }}
     container_name: {{ svc.container_name | default(svc.name) }}
     restart: unless-stopped
 {% set svc_env_file = svc.env_file | default(env_file_name) %}

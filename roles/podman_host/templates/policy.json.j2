@@ -1,14 +1,37 @@
+{% set insecure_registries = podman_host_insecure_registries | default([]) %}
+{% set signed_registries = podman_host_signed_registries | default([]) %}
 {
   "default": [
     {
-      "type": "insecureAcceptAnything"
+      "type": "reject"
     }
   ],
   "transports": {
+    "docker": {% if insecure_registries or signed_registries %}{
+{% set joiner = joiner(',\n') %}
+{% for registry in insecure_registries %}
+{{ joiner() }}      "{{ registry }}": [
+        {
+          "type": "insecureAcceptAnything"
+        }
+      ]
+{% endfor %}
+{% for rule in signed_registries %}
+{{ joiner() }}      "{{ rule.registry }}": [
+        {
+          "type": "signedBy",
+          "keyPath": "{{ rule.key_path }}"{% if rule.signed_identity is defined %},
+          "signedIdentity": {{ rule.signed_identity | to_json }}{% endif %}
+        }
+      ]
+{% endfor %}
+    }
+{% else %}{}
+{% endif %},
     "docker-daemon": {
       "": [
         {
-          "type": "insecureAcceptAnything"
+          "type": "reject"
         }
       ]
     }

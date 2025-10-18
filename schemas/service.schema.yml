@@ -17,7 +17,12 @@ properties:
     type: string
   service_image:
     type: string
+  service_image_digest:
+    type: string
+    pattern: '^sha256:[0-9a-fA-F]{64}$'
   service_ip:
+    type: string
+  service_autoupdate_mode:
     type: string
   service_port:
     type: object
@@ -97,7 +102,15 @@ properties:
   service_packages:
     type: array
     items:
-      type: string
+      anyOf:
+        - type: string
+        - type: object
+          required: [name]
+          properties:
+            name:
+              type: string
+            version:
+              type: string
   service_files:
     type: array
     items:

@@ -12,3 +12,5 @@ podman_host_firewalld_zone: trusted
 podman_host_cron_minute: 0
 podman_host_cron_hour: 2
 podman_host_prune_command: /usr/bin/podman system prune -f
+podman_host_insecure_registries: []
+podman_host_signed_registries: []

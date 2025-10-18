@@ -7,6 +7,9 @@ Deploy services using Podman Quadlets with environment files, optional user scop
 - `quadlet_scope` selects system-wide (`/etc/containers/systemd`) or per-user (`~/.config/containers/systemd`) installation.
 - Secrets from the contract populate an environment file and optional `secrets/` directory, mounted read-only into the container.
 - Health checks map directly to `HealthCmd/HealthInterval/HealthTimeout/HealthRetries` derived from `health.cmd`.
+- Container images should be pinned by digest via `service_image` + `service_image_digest` to control upgrades.
+- Quadlet auto-update is disabled by default; set `service_autoupdate_mode` or `quadlet_autoupdate_mode` if you explicitly manage rollouts that way.
+- `roles/podman_host` now ships a deny-by-default `/etc/containers/policy.json`; grant trust with `podman_host_signed_registries` or, when unavoidable, `podman_host_insecure_registries`.
 
 ## Requirements
 
@@ -32,9 +35,8 @@ After=network-online.target
 Wants=network-online.target
 
 [Container]
-Image=docker.io/library/nginx:1.27
+Image=registry.example.com/sample/service:1.27@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ContainerName=sample-service
-AutoUpdate=registry
 Environment=APP_MODE=production
 Environment=APP_FEATURE_FLAG=true
 EnvironmentFile=/etc/containers/systemd/sample-service.env
@@ -64,7 +66,7 @@ For `quadlet_scope: user`, the environment file and secrets live under `~/.confi
 2. Writes the env file and optional secret files (with `0400` default permissions).
 3. Copies the `.container` unit.
 4. Executes `systemd` tasks with the correct scope and reloads daemons.
-5. Optionally shreds rendered secrets when `secrets.shred_after_apply` is enabled.
+5. Shreds rendered secrets by default (disable with `secrets.shred_after_apply: false`).
 6. Sets `service_ip` for the post-deploy health gate.
 
 Ensure lingering is enabled when deploying user-scoped units:

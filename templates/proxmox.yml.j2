@@ -17,12 +17,17 @@ container:
     net0: "name={{ container.interface | default('eth0') }},bridge={{ container.bridge | default('vmbr0') }},ip={{ service_ip }}/{{ container.cidr | default(24) }}{% if container.gateway is defined %},gw={{ container.gateway }}{% elif service_gateway is defined %},gw={{ service_gateway }}{% endif %}"
   onboot: {{ container.onboot | default('yes') }}
   unprivileged: {{ container.unprivileged | default('yes') }}
-  features: "{{ container.features | default('nesting=1,keyctl=1') }}"
+{% if container.features is defined %}
+  features: "{{ container.features }}"
+{% endif %}
 
 setup:
   packages:{% if pkg_list | length == 0 %} []{% else %}
 {% for pkg in pkg_list %}
-    - {{ pkg }}
+    - {% if pkg is mapping %}
+      name: {{ pkg.name }}{% if pkg.version is defined %}
+      version: {{ pkg.version }}{% endif %}
+{% else %}{{ pkg }}{% endif %}
 {% endfor %}{% endif %}
   config:{% if file_list | length == 0 %} []{% else %}
 {% for item in file_list %}

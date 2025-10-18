@@ -1,5 +1,10 @@
 {% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] %}
 {% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
+{% set autoupdate_mode = quadlet_autoupdate_mode | default(service_autoupdate_mode | default(None)) %}
+{% set image_reference = service_image %}
+{% if service_image_digest is defined %}
+{% set image_reference = image_reference + '@' + service_image_digest %}
+{% endif %}
 {% set quadlet_scope_value = quadlet_scope | default('system') %}
 {% if quadlet_scope_value == 'user' %}
 {% set quadlet_base_dir = '%h/.config/containers/systemd' %}
@@ -17,9 +22,11 @@ After=network-online.target
 Wants=network-online.target
 
 [Container]
-Image={{ service_image }}
+Image={{ image_reference }}
 ContainerName={{ service_name | default(service_id) }}
-AutoUpdate=registry
+{% if autoupdate_mode %}
+AutoUpdate={{ autoupdate_mode }}
+{% endif %}
 {% for env in inline_env %}
 Environment={{ env.name }}={{ env.value }}
 {% endfor %}

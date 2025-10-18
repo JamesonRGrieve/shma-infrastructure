@@ -17,17 +17,15 @@ jobs:
       SAMPLE_SERVICE_ID: sample-service
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@b4ffde65f463c2d136add471c9f266e30e0f1c50
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
+      - name: Display Python version
+        run: python3 --version
 
       - name: Install Python dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install ansible ansible-lint yamllint jsonschema pyyaml
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r ci/requirements.txt
 
       - name: Install Ansible collections
         run: ansible-galaxy collection install -r ci/collections-${{ matrix.lane }}.yml
@@ -35,17 +33,26 @@ jobs:
       - name: Verify Docker Compose availability
         run: docker compose version
 
-      - name: Set up kubectl (stable)
-        if: matrix.lane == 'stable'
-        uses: azure/setup-kubectl@v3
-        with:
-          version: 'v1.29.3'
+      - name: Install kubectl
+        run: |
+          set -euo pipefail
+          VERSION="${KUBECTL_VERSION}"
+          if [ "$VERSION" = "latest" ]; then
+            VERSION="$(curl -L -s https://dl.k8s.io/release/stable.txt)"
+          fi
+          curl -L --fail "https://dl.k8s.io/release/${VERSION}/bin/linux/amd64/kubectl" -o kubectl
+          sudo install -m 0755 kubectl /usr/local/bin/kubectl
+        env:
+          KUBECTL_VERSION: ${{ matrix.lane == 'stable' && 'v1.29.3' || 'latest' }}
 
-      - name: Set up kubectl (latest)
-        if: matrix.lane == 'latest'
-        uses: azure/setup-kubectl@v3
-        with:
-          version: 'latest'
+      - name: Install kind
+        run: |
+          set -euo pipefail
+          curl -L --fail https://kind.sigs.k8s.io/dl/v0.22.0/kind-linux-amd64 -o kind
+          sudo install -m 0755 kind /usr/local/bin/kind
+
+      - name: Create kind cluster
+        run: kind create cluster --name ci --wait 120s
 
       - name: Validate schema definition
         run: python ci/validate_schema.py
@@ -84,5 +91,9 @@ jobs:
       - name: Render Kubernetes manifests
         run: ansible-playbook tests/render.yml -e runtime=kubernetes
 
-      - name: Validate Kubernetes manifest
-        run: kubectl apply --dry-run=client --validate=true -f /tmp/ansible-runtime/${{ env.SAMPLE_SERVICE_ID }}/kubernetes.yml
+      - name: Validate Kubernetes manifest (server-side)
+        run: kubectl apply --dry-run=server --validate=true -f /tmp/ansible-runtime/${{ env.SAMPLE_SERVICE_ID }}/kubernetes.yml
+
+      - name: Delete kind cluster
+        if: always()
+        run: kind delete cluster --name ci || true

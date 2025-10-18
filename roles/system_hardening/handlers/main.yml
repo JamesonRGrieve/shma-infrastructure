@@ -7,3 +7,9 @@
 - name: Validate sudoers configuration
   ansible.builtin.command: visudo -cf /etc/sudoers
   changed_when: false
+
+- name: Restart cockpit
+  ansible.builtin.service:
+    name: cockpit
+    state: restarted
+  when: ansible_facts.services is not defined or ansible_facts.services.get('cockpit.socket') is defined or ansible_facts.services.get('cockpit') is defined
