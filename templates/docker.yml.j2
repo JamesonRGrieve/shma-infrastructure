@@ -17,12 +17,42 @@ services:
   {{ svc.name }}:
     image: {{ svc.image }}
     container_name: {{ svc.container_name | default(svc.name) }}
-    restart: unless-stopped
-{% set svc_env_file = svc.env_file | default(env_file_name) %}
+    restart: {{ svc.restart | default('unless-stopped') }}
+{% if svc.runtime is defined %}
+    runtime: {{ svc.runtime }}
+{% endif %}
+{% if svc.hostname is defined %}
+    hostname: {{ svc.hostname }}
+{% endif %}
+{% if svc.domainname is defined %}
+    domainname: {{ svc.domainname }}
+{% endif %}
+{% if svc.user is defined %}
+    user: {{ svc.user }}
+{% endif %}
+{% if svc.working_dir is defined %}
+    working_dir: {{ svc.working_dir }}
+{% endif %}
 {% set svc_secret_env = svc.secret_env | default(secret_env) %}
+{% set svc_env_file = svc.env_file | default(env_file_name) %}
+{% set env_ns = namespace(files=[]) %}
+{% if svc.env_file is defined %}
+  {% if svc.env_file is string %}
+    {% set _ = env_ns.files.append(svc.env_file) %}
+  {% elif svc.env_file is iterable %}
+    {% for ef in svc.env_file %}
+      {% set _ = env_ns.files.append(ef) %}
+    {% endfor %}
+  {% endif %}
+{% endif %}
 {% if svc_secret_env %}
+  {% set _ = env_ns.files.append('./' + svc_env_file) %}
+{% endif %}
+{% if env_ns.files %}
     env_file:
-      - "./{{ svc_env_file }}"
+{% for ef in env_ns.files %}
+      - "{{ ef }}"
+{% endfor %}
 {% endif %}
 {% set inline_env = svc.env | default([]) %}
 {% if inline_env %}
@@ -30,6 +60,12 @@ services:
 {% for item in inline_env %}
       {{ item.name }}: {{ item.value }}
 {% endfor %}
+{% endif %}
+{% if svc.entrypoint is defined %}
+    entrypoint: {{ svc.entrypoint if svc.entrypoint is string else svc.entrypoint | to_json }}
+{% endif %}
+{% if svc.command is defined %}
+    command: {{ svc.command if svc.command is string else svc.command | to_json }}
 {% endif %}
 {% set volumes = svc.volumes | default([]) %}
 {% if volumes %}
@@ -52,16 +88,53 @@ services:
       - {{ net }}
 {% endfor %}
 {% endif %}
-{% if health is defined %}
-    healthcheck:
-      test: {{ health.cmd | default(['true']) | to_json }}
-      interval: {{ health.interval | default('10s') }}
-      timeout: {{ health.timeout | default('5s') }}
-      retries: {{ health.retries | default(3) }}
+{% if svc.extra_hosts is defined and svc.extra_hosts | length > 0 %}
+    extra_hosts:
+{% for host in svc.extra_hosts %}
+      - {{ host }}
+{% endfor %}
 {% endif %}
-{% if file_secrets %}
+{% if svc.labels is defined and svc.labels | length > 0 %}
+    labels:
+{% if svc.labels is mapping %}
+{% for key, value in svc.labels.items() %}
+      {{ key }}: {{ value }}
+{% endfor %}
+{% else %}
+{% for label in svc.labels %}
+      - "{{ label }}"
+{% endfor %}
+{% endif %}
+{% endif %}
+{% if svc.depends_on is defined and svc.depends_on %}
+    depends_on:
+{% if svc.depends_on is mapping %}
+{{ svc.depends_on | to_nice_yaml(indent=6) | indent(6) }}
+{% else %}
+{% for dep in svc.depends_on %}
+      - {{ dep }}
+{% endfor %}
+{% endif %}
+{% endif %}
+{% if svc.deploy is defined %}
+    deploy:
+{{ svc.deploy | to_nice_yaml(indent=6) | indent(6) }}
+{% endif %}
+{% set svc_health = svc.health if svc.health is defined else (health if loop.first and health is defined else None) %}
+{% if svc_health is not none %}
+    healthcheck:
+      test: {{ svc_health.cmd | default(['true']) | to_json }}
+      interval: {{ svc_health.interval | default('10s') }}
+      timeout: {{ svc_health.timeout | default('5s') }}
+      retries: {{ svc_health.retries | default(3) }}
+{% if svc_health.start_period is defined %}
+      start_period: {{ svc_health.start_period }}
+{% endif %}
+{% endif %}
+{% set svc_file_secrets = svc.file_secrets | default(file_secrets) %}
+{% if svc_file_secrets %}
     secrets:
-{% for secret in file_secrets %}
+{% for secret in svc_file_secrets %}
       - source: {{ secret.name }}
         target: {{ secret.target | default(secret.name) }}
         mode: {{ secret.mode | default('0400') }}
@@ -82,7 +155,7 @@ services:
 volumes:
 {% for volume_name in ns.volumes %}
   {{ volume_name }}:
-    driver: local
+    driver: {{ volume_driver | default('local') }}
 {% endfor %}
 {% endif %}
 

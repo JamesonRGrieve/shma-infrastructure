@@ -1,0 +1,4302 @@
+# ./.github/workflows/ci.yml
+
+```
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-and-validate:
+    name: "Lint and validate (${{ matrix.lane }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [stable, latest]
+    env:
+      SAMPLE_SERVICE_ID: sample-service
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ansible ansible-lint yamllint jsonschema pyyaml
+
+      - name: Install Ansible collections
+        run: ansible-galaxy collection install -r ci/collections-${{ matrix.lane }}.yml
+
+      - name: Verify Docker Compose availability
+        run: docker compose version
+
+      - name: Set up kubectl (stable)
+        if: matrix.lane == 'stable'
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.29.3'
+
+      - name: Set up kubectl (latest)
+        if: matrix.lane == 'latest'
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Validate schema definition
+        run: python ci/validate_schema.py
+
+      - name: Run yamllint
+        run: |
+          yamllint roles/common schemas templates/proxmox.yml.j2 templates/docker.yml.j2 templates/kubernetes.yml.j2 tests
+
+      - name: Run ansible-lint
+        run: ansible-lint roles/common tests/render.yml
+
+      - name: Render Proxmox configuration
+        run: ansible-playbook tests/render.yml -e runtime=proxmox
+
+      - name: Validate Proxmox manifest
+        run: yamllint /tmp/ansible-runtime/${{ env.SAMPLE_SERVICE_ID }}/proxmox.yml
+
+      - name: Render Docker Compose configuration
+        run: ansible-playbook tests/render.yml -e runtime=docker
+
+      - name: Validate Docker Compose manifest
+        run: docker compose -f /tmp/ansible-runtime/${{ env.SAMPLE_SERVICE_ID }}/docker.yml config
+
+      - name: Render Podman Quadlet configuration
+        run: ansible-playbook tests/render.yml -e runtime=podman
+
+      - name: Validate Quadlet unit
+        run: systemd-analyze verify /tmp/ansible-runtime/${{ env.SAMPLE_SERVICE_ID }}/podman.yml
+
+      - name: Render bare-metal systemd configuration
+        run: ansible-playbook tests/render.yml -e runtime=baremetal
+
+      - name: Validate systemd unit
+        run: systemd-analyze verify /tmp/ansible-runtime/${{ env.SAMPLE_SERVICE_ID }}/baremetal.yml
+
+      - name: Render Kubernetes manifests
+        run: ansible-playbook tests/render.yml -e runtime=kubernetes
+
+      - name: Validate Kubernetes manifest
+        run: kubectl apply --dry-run=client --validate=true -f /tmp/ansible-runtime/${{ env.SAMPLE_SERVICE_ID }}/kubernetes.yml
+
+```
+
+# ./ci/collections-latest.yml
+
+```
+collections:
+  - name: community.general
+  - name: community.docker
+  - name: community.mysql
+  - name: kubernetes.core
+
+```
+
+# ./ci/collections-stable.yml
+
+```
+collections:
+  - name: community.general
+    version: 7.5.0
+  - name: community.docker
+    version: 3.4.10
+  - name: community.mysql
+    version: 3.7.3
+  - name: kubernetes.core
+    version: 5.0.0
+
+```
+
+# ./ci/validate_schema.py
+
+```
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import yaml
+from jsonschema import Draft202012Validator
+
+
+def main() -> int:
+    schema_path = Path("schemas/service.schema.yml")
+    if not schema_path.exists():
+        print(f"Schema file not found: {schema_path}", file=sys.stderr)
+        return 1
+
+    try:
+        schema = yaml.safe_load(schema_path.read_text())
+    except yaml.YAMLError as exc:  # pragma: no cover - runtime validation
+        print(f"Failed to parse schema: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        Draft202012Validator.check_schema(schema)
+    except Exception as exc:  # pragma: no cover - validation error details vary
+        print(f"Schema validation failed: {exc}", file=sys.stderr)
+        return 1
+
+    print("Schema validation succeeded.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+```
+
+# ./docs/adapter.mermaid
+
+```
+classDiagram
+    class RuntimeAdapter {
+        +deploy(config)
+        +validate_config()
+        +health_check()
+    }
+    
+    class LXCAdapter {
+        +create_container()
+        +configure_container()
+        +start_container()
+    }
+    
+    class ComposeAdapter {
+        +write_compose_file()
+        +docker_compose_up()
+    }
+    
+    class QuadletAdapter {
+        +write_container_file()
+        +systemctl_enable()
+    }
+    
+    class K8sAdapter {
+        +apply_manifests()
+        +wait_for_ready()
+    }
+    
+    class BaremetalAdapter {
+        +install_packages()
+        +configure_systemd()
+        +start_service()
+    }
+    
+    RuntimeAdapter <|-- LXCAdapter
+    RuntimeAdapter <|-- ComposeAdapter
+    RuntimeAdapter <|-- QuadletAdapter
+    RuntimeAdapter <|-- K8sAdapter
+    RuntimeAdapter <|-- BaremetalAdapter
+```
+
+# ./docs/baremetal.md
+
+```
+# Bare-Metal systemd Deployment Guide
+
+Deploy services directly on bare-metal or virtual machines with idempotent configuration and generic systemd units.
+
+## Highlights
+
+- Packages installed via non-interactive APT (`DEBIAN_FRONTEND=noninteractive`).
+- Configuration files defined in the service contract render exactly once and trigger handlers when changed.
+- Generated units inherit defaults from `templates/baremetal.yml.j2`, keeping runtime-agnostic settings consistent.
+
+## Prerequisites
+
+```bash
+sudo apt update
+sudo apt install systemd
+ansible-galaxy collection install community.general
+```
+
+## Workflow
+
+1. Render the systemd unit (`templates/baremetal.yml.j2`) using the shared contract.
+2. Apply with `roles/common/apply_runtime/tasks/baremetal.yml`, which:
+   - Installs required packages via APT when declared.
+   - Writes configuration files with their requested permissions.
+   - Places the rendered unit at `/etc/systemd/system/<service_id>.service`.
+   - Enables and starts the service, then runs the shared health command.
+
+## Variables
+
+- `service_unit` – override description, dependencies, or the `[Service]` stanza for advanced workloads.
+- `service_packages` – list of packages to install before enabling the unit.
+- `secrets.shred_after_apply` – available to keep secret files ephemeral when combined with runtime adapters that create them locally.
+
+## Validation
+
+After rendering:
+
+```bash
+systemd-analyze verify /tmp/ansible-runtime/sample-service/baremetal.yml
+```
+
+Run the playbook and rely on the shared health command for a final check:
+
+```bash
+ansible-playbook playbooks/deploy-sample.yml -e runtime=baremetal -e "health.cmd=['/bin/sh','-c','exit 0']"
+```
+
+```
+
+# ./docs/components.mermaid
+
+```
+sequenceDiagram
+    participant User
+    participant Ansible
+    participant Validator
+    participant Renderer
+    participant Adapter
+    participant Target
+    
+    User->>Ansible: ansible-playbook -e runtime=lxc
+    Ansible->>Validator: Load service contract
+    Validator->>Validator: Check schema
+    Validator->>Validator: Verify dependencies
+    Validator-->>Ansible: ✓ Valid
+    
+    Ansible->>Renderer: Render for runtime=lxc
+    Renderer->>Renderer: Select template
+    Renderer->>Renderer: Apply variables
+    Renderer-->>Ansible: Generated config
+    
+    Ansible->>Adapter: Apply with LXC adapter
+    Adapter->>Target: Create container (Proxmox API)
+    Target-->>Adapter: Container created
+    Adapter->>Target: Install packages
+    Adapter->>Target: Configure service
+    Adapter->>Target: Start service
+    Target-->>Adapter: Service running
+    
+    Adapter->>Target: Run health check
+    Target-->>Adapter: Health OK
+    Adapter-->>Ansible: Deployment complete
+    Ansible-->>User: ✅ Service deployed
+```
+
+# ./docs/docker.md
+
+```
+# Docker Compose Deployment Guide
+
+Deploy services using Docker Compose with secret-aware environment files and Compose v2 tooling.
+
+## What's new
+
+- Secrets defined in the service contract populate a dedicated `./<service>.env` file; sensitive values no longer appear inline.
+- File-based secrets render into `secrets/` and are attached via Compose `secrets` blocks.
+- `community.docker.docker_compose_v2` drives deployments to align with the modern Docker CLI plugin.
+- Health probes come directly from `health.cmd` ensuring parity with other runtimes.
+
+## Prerequisites
+
+```bash
+sudo apt install docker.io docker-compose-plugin
+ansible-galaxy collection install community.docker
+```
+
+Verify the plugin version:
+
+```bash
+docker compose version
+```
+
+## Template highlights
+
+`templates/docker.yml.j2` renders a service similar to the bundled sample:
+
+```yaml
+version: '3.8'
+
+services:
+  sample-service:
+    image: docker.io/library/nginx:1.27
+    container_name: sample-service
+    restart: unless-stopped
+    env_file:
+      - ./sample-service.env
+    environment:
+      APP_MODE: production
+      APP_FEATURE_FLAG: "true"
+    volumes:
+      - sample-service-config:/etc/sample-service
+    ports:
+      - "192.0.2.50:8080:8080"
+    networks:
+      - app-network
+    healthcheck:
+      test: ["/bin/sh", "-c", "exit 0"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    secrets:
+      - source: tls-cert
+        target: /etc/sample-service/certs/tls.crt
+        mode: '0400'
+
+volumes:
+  sample-service-config:
+    driver: local
+
+secrets:
+  tls-cert:
+    file: ./secrets/tls-cert
+
+networks:
+  app-network:
+    driver: bridge
+```
+
+## Contract inputs
+
+- `secrets.env` entries feed the env file.
+- `secrets.files` entries create files in `secrets/<name>` and populate the Compose `secrets` map.
+- `secrets.shred_after_apply` removes rendered secrets after deployment when set to `true`.
+- `service_ports` control host bindings; publish only the ports you intend to expose.
+
+## Validating the render
+
+After running `ansible-playbook tests/render.yml -e runtime=docker`, verify the manifest:
+
+```bash
+docker compose -f /tmp/ansible-runtime/sample-service/docker.yml config
+```
+
+## Deployment with Ansible
+
+`roles/common/apply_runtime/tasks/docker.yml`:
+
+1. Builds the env file and optional `secrets/` directory under the render output.
+2. Invokes `community.docker.docker_compose_v2` with `pull: always` to keep images fresh.
+3. Optionally shreds rendered secrets when `secrets.shred_after_apply` is enabled.
+4. Sets `service_ip` for the unified health gate.
+
+Use the shared health command to run a post-deploy verification:
+
+```bash
+ansible-playbook playbooks/deploy-sample.yml -e runtime=docker -e "health.cmd=['/bin/sh','-c','exit 0']"
+```
+
+```
+
+# ./docs/kubernetes.md
+
+```
+# Kubernetes Deployment Guide
+
+Render Kubernetes manifests with Secret integration, readiness probes, and resource requests derived from the shared contract.
+
+## Updates
+
+- `templates/kubernetes.yml.j2` generates a single Secret that stores both environment variables and file-based secrets.
+- Containers mount secret files via a dedicated volume and consume environment variables via `valueFrom`.
+- Liveness and readiness probes originate from `health.cmd`, keeping checks consistent across runtimes.
+
+## Prerequisites
+
+```bash
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+chmod +x kubectl
+sudo mv kubectl /usr/local/bin/
+ansible-galaxy collection install kubernetes.core
+```
+
+## Rendered resources
+
+`templates/kubernetes.yml.j2` emits:
+
+- `Secret` – named `<service_id>-secrets`, containing keys for every `secrets.env` entry plus file secrets.
+- `PersistentVolumeClaim` – sized from `service_storage_gb` or `service_storage_size`.
+- `Deployment` – references the Secret for env vars, mounts secret files, and configures probes/resources.
+- `Service` – exposes declared `service_ports` within the cluster.
+
+Snippet:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-service
+spec:
+  template:
+    spec:
+      containers:
+        - name: sample-service
+          env:
+            - name: SAMPLE_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: sample-service-secrets
+                  key: SAMPLE_SERVICE_TOKEN
+          volumeMounts:
+            - name: secret-files
+              mountPath: /etc/sample-service/certs/tls.crt
+              subPath: tls-cert
+              readOnly: true
+          livenessProbe:
+            exec:
+              command: ["/bin/sh", "-c", "exit 0"]
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["/bin/sh", "-c", "exit 0"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+```
+
+## Validation
+
+Render and validate locally:
+
+```bash
+ansible-playbook tests/render.yml -e runtime=kubernetes -e @tests/sample_service.yml
+kubectl apply --dry-run=client --validate=true -f /tmp/ansible-runtime/sample-service/kubernetes.yml
+```
+
+## Deployment tips
+
+- Ensure the referenced namespace (`k8s_namespace`) exists before applying.
+- Consider separate Secrets when mounting large binary blobs; extend `secrets.files` as needed.
+- Adjust `service_replicas` to scale deployments and rely on the readiness probe before routing traffic.
+
+```
+
+# ./docs/LICENSE.md
+
+```
+                    GNU AFFERO GENERAL PUBLIC LICENSE
+                       Version 3, 19 November 2007
+
+ Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
+ Everyone is permitted to copy and distribute verbatim copies
+ of this license document, but changing it is not allowed.
+
+                            Preamble
+
+  The GNU Affero General Public License is a free, copyleft license for
+software and other kinds of works, specifically designed to ensure
+cooperation with the community in the case of network server software.
+
+  The licenses for most software and other practical works are designed
+to take away your freedom to share and change the works.  By contrast,
+our General Public Licenses are intended to guarantee your freedom to
+share and change all versions of a program--to make sure it remains free
+software for all its users.
+
+  When we speak of free software, we are referring to freedom, not
+price.  Our General Public Licenses are designed to make sure that you
+have the freedom to distribute copies of free software (and charge for
+them if you wish), that you receive source code or can get it if you
+want it, that you can change the software or use pieces of it in new
+free programs, and that you know you can do these things.
+
+  Developers that use our General Public Licenses protect your rights
+with two steps: (1) assert copyright on the software, and (2) offer
+you this License which gives you legal permission to copy, distribute
+and/or modify the software.
+
+  A secondary benefit of defending all users' freedom is that
+improvements made in alternate versions of the program, if they
+receive widespread use, become available for other developers to
+incorporate.  Many developers of free software are heartened and
+encouraged by the resulting cooperation.  However, in the case of
+software used on network servers, this result may fail to come about.
+The GNU General Public License permits making a modified version and
+letting the public access it on a server without ever releasing its
+source code to the public.
+
+  The GNU Affero General Public License is designed specifically to
+ensure that, in such cases, the modified source code becomes available
+to the community.  It requires the operator of a network server to
+provide the source code of the modified version running there to the
+users of that server.  Therefore, public use of a modified version, on
+a publicly accessible server, gives the public access to the source
+code of the modified version.
+
+  An older license, called the Affero General Public License and
+published by Affero, was designed to accomplish similar goals.  This is
+a different license, not a version of the Affero GPL, but Affero has
+released a new version of the Affero GPL which permits relicensing under
+this license.
+
+  The precise terms and conditions for copying, distribution and
+modification follow.
+
+                       TERMS AND CONDITIONS
+
+  0. Definitions.
+
+  "This License" refers to version 3 of the GNU Affero General Public License.
+
+  "Copyright" also means copyright-like laws that apply to other kinds of
+works, such as semiconductor masks.
+
+  "The Program" refers to any copyrightable work licensed under this
+License.  Each licensee is addressed as "you".  "Licensees" and
+"recipients" may be individuals or organizations.
+
+  To "modify" a work means to copy from or adapt all or part of the work
+in a fashion requiring copyright permission, other than the making of an
+exact copy.  The resulting work is called a "modified version" of the
+earlier work or a work "based on" the earlier work.
+
+  A "covered work" means either the unmodified Program or a work based
+on the Program.
+
+  To "propagate" a work means to do anything with it that, without
+permission, would make you directly or secondarily liable for
+infringement under applicable copyright law, except executing it on a
+computer or modifying a private copy.  Propagation includes copying,
+distribution (with or without modification), making available to the
+public, and in some countries other activities as well.
+
+  To "convey" a work means any kind of propagation that enables other
+parties to make or receive copies.  Mere interaction with a user through
+a computer network, with no transfer of a copy, is not conveying.
+
+  An interactive user interface displays "Appropriate Legal Notices"
+to the extent that it includes a convenient and prominently visible
+feature that (1) displays an appropriate copyright notice, and (2)
+tells the user that there is no warranty for the work (except to the
+extent that warranties are provided), that licensees may convey the
+work under this License, and how to view a copy of this License.  If
+the interface presents a list of user commands or options, such as a
+menu, a prominent item in the list meets this criterion.
+
+  1. Source Code.
+
+  The "source code" for a work means the preferred form of the work
+for making modifications to it.  "Object code" means any non-source
+form of a work.
+
+  A "Standard Interface" means an interface that either is an official
+standard defined by a recognized standards body, or, in the case of
+interfaces specified for a particular programming language, one that
+is widely used among developers working in that language.
+
+  The "System Libraries" of an executable work include anything, other
+than the work as a whole, that (a) is included in the normal form of
+packaging a Major Component, but which is not part of that Major
+Component, and (b) serves only to enable use of the work with that
+Major Component, or to implement a Standard Interface for which an
+implementation is available to the public in source code form.  A
+"Major Component", in this context, means a major essential component
+(kernel, window system, and so on) of the specific operating system
+(if any) on which the executable work runs, or a compiler used to
+produce the work, or an object code interpreter used to run it.
+
+  The "Corresponding Source" for a work in object code form means all
+the source code needed to generate, install, and (for an executable
+work) run the object code and to modify the work, including scripts to
+control those activities.  However, it does not include the work's
+System Libraries, or general-purpose tools or generally available free
+programs which are used unmodified in performing those activities but
+which are not part of the work.  For example, Corresponding Source
+includes interface definition files associated with source files for
+the work, and the source code for shared libraries and dynamically
+linked subprograms that the work is specifically designed to require,
+such as by intimate data communication or control flow between those
+subprograms and other parts of the work.
+
+  The Corresponding Source need not include anything that users
+can regenerate automatically from other parts of the Corresponding
+Source.
+
+  The Corresponding Source for a work in source code form is that
+same work.
+
+  2. Basic Permissions.
+
+  All rights granted under this License are granted for the term of
+copyright on the Program, and are irrevocable provided the stated
+conditions are met.  This License explicitly affirms your unlimited
+permission to run the unmodified Program.  The output from running a
+covered work is covered by this License only if the output, given its
+content, constitutes a covered work.  This License acknowledges your
+rights of fair use or other equivalent, as provided by copyright law.
+
+  You may make, run and propagate covered works that you do not
+convey, without conditions so long as your license otherwise remains
+in force.  You may convey covered works to others for the sole purpose
+of having them make modifications exclusively for you, or provide you
+with facilities for running those works, provided that you comply with
+the terms of this License in conveying all material for which you do
+not control copyright.  Those thus making or running the covered works
+for you must do so exclusively on your behalf, under your direction
+and control, on terms that prohibit them from making any copies of
+your copyrighted material outside their relationship with you.
+
+  Conveying under any other circumstances is permitted solely under
+the conditions stated below.  Sublicensing is not allowed; section 10
+makes it unnecessary.
+
+  3. Protecting Users' Legal Rights From Anti-Circumvention Law.
+
+  No covered work shall be deemed part of an effective technological
+measure under any applicable law fulfilling obligations under article
+11 of the WIPO copyright treaty adopted on 20 December 1996, or
+similar laws prohibiting or restricting circumvention of such
+measures.
+
+  When you convey a covered work, you waive any legal power to forbid
+circumvention of technological measures to the extent such circumvention
+is effected by exercising rights under this License with respect to
+the covered work, and you disclaim any intention to limit operation or
+modification of the work as a means of enforcing, against the work's
+users, your or third parties' legal rights to forbid circumvention of
+technological measures.
+
+  4. Conveying Verbatim Copies.
+
+  You may convey verbatim copies of the Program's source code as you
+receive it, in any medium, provided that you conspicuously and
+appropriately publish on each copy an appropriate copyright notice;
+keep intact all notices stating that this License and any
+non-permissive terms added in accord with section 7 apply to the code;
+keep intact all notices of the absence of any warranty; and give all
+recipients a copy of this License along with the Program.
+
+  You may charge any price or no price for each copy that you convey,
+and you may offer support or warranty protection for a fee.
+
+  5. Conveying Modified Source Versions.
+
+  You may convey a work based on the Program, or the modifications to
+produce it from the Program, in the form of source code under the
+terms of section 4, provided that you also meet all of these conditions:
+
+    a) The work must carry prominent notices stating that you modified
+    it, and giving a relevant date.
+
+    b) The work must carry prominent notices stating that it is
+    released under this License and any conditions added under section
+    7.  This requirement modifies the requirement in section 4 to
+    "keep intact all notices".
+
+    c) You must license the entire work, as a whole, under this
+    License to anyone who comes into possession of a copy.  This
+    License will therefore apply, along with any applicable section 7
+    additional terms, to the whole of the work, and all its parts,
+    regardless of how they are packaged.  This License gives no
+    permission to license the work in any other way, but it does not
+    invalidate such permission if you have separately received it.
+
+    d) If the work has interactive user interfaces, each must display
+    Appropriate Legal Notices; however, if the Program has interactive
+    interfaces that do not display Appropriate Legal Notices, your
+    work need not make them do so.
+
+  A compilation of a covered work with other separate and independent
+works, which are not by their nature extensions of the covered work,
+and which are not combined with it such as to form a larger program,
+in or on a volume of a storage or distribution medium, is called an
+"aggregate" if the compilation and its resulting copyright are not
+used to limit the access or legal rights of the compilation's users
+beyond what the individual works permit.  Inclusion of a covered work
+in an aggregate does not cause this License to apply to the other
+parts of the aggregate.
+
+  6. Conveying Non-Source Forms.
+
+  You may convey a covered work in object code form under the terms
+of sections 4 and 5, provided that you also convey the
+machine-readable Corresponding Source under the terms of this License,
+in one of these ways:
+
+    a) Convey the object code in, or embodied in, a physical product
+    (including a physical distribution medium), accompanied by the
+    Corresponding Source fixed on a durable physical medium
+    customarily used for software interchange.
+
+    b) Convey the object code in, or embodied in, a physical product
+    (including a physical distribution medium), accompanied by a
+    written offer, valid for at least three years and valid for as
+    long as you offer spare parts or customer support for that product
+    model, to give anyone who possesses the object code either (1) a
+    copy of the Corresponding Source for all the software in the
+    product that is covered by this License, on a durable physical
+    medium customarily used for software interchange, for a price no
+    more than your reasonable cost of physically performing this
+    conveying of source, or (2) access to copy the
+    Corresponding Source from a network server at no charge.
+
+    c) Convey individual copies of the object code with a copy of the
+    written offer to provide the Corresponding Source.  This
+    alternative is allowed only occasionally and noncommercially, and
+    only if you received the object code with such an offer, in accord
+    with subsection 6b.
+
+    d) Convey the object code by offering access from a designated
+    place (gratis or for a charge), and offer equivalent access to the
+    Corresponding Source in the same way through the same place at no
+    further charge.  You need not require recipients to copy the
+    Corresponding Source along with the object code.  If the place to
+    copy the object code is a network server, the Corresponding Source
+    may be on a different server (operated by you or a third party)
+    that supports equivalent copying facilities, provided you maintain
+    clear directions next to the object code saying where to find the
+    Corresponding Source.  Regardless of what server hosts the
+    Corresponding Source, you remain obligated to ensure that it is
+    available for as long as needed to satisfy these requirements.
+
+    e) Convey the object code using peer-to-peer transmission, provided
+    you inform other peers where the object code and Corresponding
+    Source of the work are being offered to the general public at no
+    charge under subsection 6d.
+
+  A separable portion of the object code, whose source code is excluded
+from the Corresponding Source as a System Library, need not be
+included in conveying the object code work.
+
+  A "User Product" is either (1) a "consumer product", which means any
+tangible personal property which is normally used for personal, family,
+or household purposes, or (2) anything designed or sold for incorporation
+into a dwelling.  In determining whether a product is a consumer product,
+doubtful cases shall be resolved in favor of coverage.  For a particular
+product received by a particular user, "normally used" refers to a
+typical or common use of that class of product, regardless of the status
+of the particular user or of the way in which the particular user
+actually uses, or expects or is expected to use, the product.  A product
+is a consumer product regardless of whether the product has substantial
+commercial, industrial or non-consumer uses, unless such uses represent
+the only significant mode of use of the product.
+
+  "Installation Information" for a User Product means any methods,
+procedures, authorization keys, or other information required to install
+and execute modified versions of a covered work in that User Product from
+a modified version of its Corresponding Source.  The information must
+suffice to ensure that the continued functioning of the modified object
+code is in no case prevented or interfered with solely because
+modification has been made.
+
+  If you convey an object code work under this section in, or with, or
+specifically for use in, a User Product, and the conveying occurs as
+part of a transaction in which the right of possession and use of the
+User Product is transferred to the recipient in perpetuity or for a
+fixed term (regardless of how the transaction is characterized), the
+Corresponding Source conveyed under this section must be accompanied
+by the Installation Information.  But this requirement does not apply
+if neither you nor any third party retains the ability to install
+modified object code on the User Product (for example, the work has
+been installed in ROM).
+
+  The requirement to provide Installation Information does not include a
+requirement to continue to provide support service, warranty, or updates
+for a work that has been modified or installed by the recipient, or for
+the User Product in which it has been modified or installed.  Access to a
+network may be denied when the modification itself materially and
+adversely affects the operation of the network or violates the rules and
+protocols for communication across the network.
+
+  Corresponding Source conveyed, and Installation Information provided,
+in accord with this section must be in a format that is publicly
+documented (and with an implementation available to the public in
+source code form), and must require no special password or key for
+unpacking, reading or copying.
+
+  7. Additional Terms.
+
+  "Additional permissions" are terms that supplement the terms of this
+License by making exceptions from one or more of its conditions.
+Additional permissions that are applicable to the entire Program shall
+be treated as though they were included in this License, to the extent
+that they are valid under applicable law.  If additional permissions
+apply only to part of the Program, that part may be used separately
+under those permissions, but the entire Program remains governed by
+this License without regard to the additional permissions.
+
+  When you convey a copy of a covered work, you may at your option
+remove any additional permissions from that copy, or from any part of
+it.  (Additional permissions may be written to require their own
+removal in certain cases when you modify the work.)  You may place
+additional permissions on material, added by you to a covered work,
+for which you have or can give appropriate copyright permission.
+
+  Notwithstanding any other provision of this License, for material you
+add to a covered work, you may (if authorized by the copyright holders of
+that material) supplement the terms of this License with terms:
+
+    a) Disclaiming warranty or limiting liability differently from the
+    terms of sections 15 and 16 of this License; or
+
+    b) Requiring preservation of specified reasonable legal notices or
+    author attributions in that material or in the Appropriate Legal
+    Notices displayed by works containing it; or
+
+    c) Prohibiting misrepresentation of the origin of that material, or
+    requiring that modified versions of such material be marked in
+    reasonable ways as different from the original version; or
+
+    d) Limiting the use for publicity purposes of names of licensors or
+    authors of the material; or
+
+    e) Declining to grant rights under trademark law for use of some
+    trade names, trademarks, or service marks; or
+
+    f) Requiring indemnification of licensors and authors of that
+    material by anyone who conveys the material (or modified versions of
+    it) with contractual assumptions of liability to the recipient, for
+    any liability that these contractual assumptions directly impose on
+    those licensors and authors.
+
+  All other non-permissive additional terms are considered "further
+restrictions" within the meaning of section 10.  If the Program as you
+received it, or any part of it, contains a notice stating that it is
+governed by this License along with a term that is a further
+restriction, you may remove that term.  If a license document contains
+a further restriction but permits relicensing or conveying under this
+License, you may add to a covered work material governed by the terms
+of that license document, provided that the further restriction does
+not survive such relicensing or conveying.
+
+  If you add terms to a covered work in accord with this section, you
+must place, in the relevant source files, a statement of the
+additional terms that apply to those files, or a notice indicating
+where to find the applicable terms.
+
+  Additional terms, permissive or non-permissive, may be stated in the
+form of a separately written license, or stated as exceptions;
+the above requirements apply either way.
+
+  8. Termination.
+
+  You may not propagate or modify a covered work except as expressly
+provided under this License.  Any attempt otherwise to propagate or
+modify it is void, and will automatically terminate your rights under
+this License (including any patent licenses granted under the third
+paragraph of section 11).
+
+  However, if you cease all violation of this License, then your
+license from a particular copyright holder is reinstated (a)
+provisionally, unless and until the copyright holder explicitly and
+finally terminates your license, and (b) permanently, if the copyright
+holder fails to notify you of the violation by some reasonable means
+prior to 60 days after the cessation.
+
+  Moreover, your license from a particular copyright holder is
+reinstated permanently if the copyright holder notifies you of the
+violation by some reasonable means, this is the first time you have
+received notice of violation of this License (for any work) from that
+copyright holder, and you cure the violation prior to 30 days after
+your receipt of the notice.
+
+  Termination of your rights under this section does not terminate the
+licenses of parties who have received copies or rights from you under
+this License.  If your rights have been terminated and not permanently
+reinstated, you do not qualify to receive new licenses for the same
+material under section 10.
+
+  9. Acceptance Not Required for Having Copies.
+
+  You are not required to accept this License in order to receive or
+run a copy of the Program.  Ancillary propagation of a covered work
+occurring solely as a consequence of using peer-to-peer transmission
+to receive a copy likewise does not require acceptance.  However,
+nothing other than this License grants you permission to propagate or
+modify any covered work.  These actions infringe copyright if you do
+not accept this License.  Therefore, by modifying or propagating a
+covered work, you indicate your acceptance of this License to do so.
+
+  10. Automatic Licensing of Downstream Recipients.
+
+  Each time you convey a covered work, the recipient automatically
+receives a license from the original licensors, to run, modify and
+propagate that work, subject to this License.  You are not responsible
+for enforcing compliance by third parties with this License.
+
+  An "entity transaction" is a transaction transferring control of an
+organization, or substantially all assets of one, or subdividing an
+organization, or merging organizations.  If propagation of a covered
+work results from an entity transaction, each party to that
+transaction who receives a copy of the work also receives whatever
+licenses to the work the party's predecessor in interest had or could
+give under the previous paragraph, plus a right to possession of the
+Corresponding Source of the work from the predecessor in interest, if
+the predecessor has it or can get it with reasonable efforts.
+
+  You may not impose any further restrictions on the exercise of the
+rights granted or affirmed under this License.  For example, you may
+not impose a license fee, royalty, or other charge for exercise of
+rights granted under this License, and you may not initiate litigation
+(including a cross-claim or counterclaim in a lawsuit) alleging that
+any patent claim is infringed by making, using, selling, offering for
+sale, or importing the Program or any portion of it.
+
+  11. Patents.
+
+  A "contributor" is a copyright holder who authorizes use under this
+License of the Program or a work on which the Program is based.  The
+work thus licensed is called the contributor's "contributor version".
+
+  A contributor's "essential patent claims" are all patent claims
+owned or controlled by the contributor, whether already acquired or
+hereafter acquired, that would be infringed by some manner, permitted
+by this License, of making, using, or selling its contributor version,
+but do not include claims that would be infringed only as a
+consequence of further modification of the contributor version.  For
+purposes of this definition, "control" includes the right to grant
+patent sublicenses in a manner consistent with the requirements of
+this License.
+
+  Each contributor grants you a non-exclusive, worldwide, royalty-free
+patent license under the contributor's essential patent claims, to
+make, use, sell, offer for sale, import and otherwise run, modify and
+propagate the contents of its contributor version.
+
+  In the following three paragraphs, a "patent license" is any express
+agreement or commitment, however denominated, not to enforce a patent
+(such as an express permission to practice a patent or covenant not to
+sue for patent infringement).  To "grant" such a patent license to a
+party means to make such an agreement or commitment not to enforce a
+patent against the party.
+
+  If you convey a covered work, knowingly relying on a patent license,
+and the Corresponding Source of the work is not available for anyone
+to copy, free of charge and under the terms of this License, through a
+publicly available network server or other readily accessible means,
+then you must either (1) cause the Corresponding Source to be so
+available, or (2) arrange to deprive yourself of the benefit of the
+patent license for this particular work, or (3) arrange, in a manner
+consistent with the requirements of this License, to extend the patent
+license to downstream recipients.  "Knowingly relying" means you have
+actual knowledge that, but for the patent license, your conveying the
+covered work in a country, or your recipient's use of the covered work
+in a country, would infringe one or more identifiable patents in that
+country that you have reason to believe are valid.
+
+  If, pursuant to or in connection with a single transaction or
+arrangement, you convey, or propagate by procuring conveyance of, a
+covered work, and grant a patent license to some of the parties
+receiving the covered work authorizing them to use, propagate, modify
+or convey a specific copy of the covered work, then the patent license
+you grant is automatically extended to all recipients of the covered
+work and works based on it.
+
+  A patent license is "discriminatory" if it does not include within
+the scope of its coverage, prohibits the exercise of, or is
+conditioned on the non-exercise of one or more of the rights that are
+specifically granted under this License.  You may not convey a covered
+work if you are a party to an arrangement with a third party that is
+in the business of distributing software, under which you make payment
+to the third party based on the extent of your activity of conveying
+the work, and under which the third party grants, to any of the
+parties who would receive the covered work from you, a discriminatory
+patent license (a) in connection with copies of the covered work
+conveyed by you (or copies made from those copies), or (b) primarily
+for and in connection with specific products or compilations that
+contain the covered work, unless you entered into that arrangement,
+or that patent license was granted, prior to 28 March 2007.
+
+  Nothing in this License shall be construed as excluding or limiting
+any implied license or other defenses to infringement that may
+otherwise be available to you under applicable patent law.
+
+  12. No Surrender of Others' Freedom.
+
+  If conditions are imposed on you (whether by court order, agreement or
+otherwise) that contradict the conditions of this License, they do not
+excuse you from the conditions of this License.  If you cannot convey a
+covered work so as to satisfy simultaneously your obligations under this
+License and any other pertinent obligations, then as a consequence you may
+not convey it at all.  For example, if you agree to terms that obligate you
+to collect a royalty for further conveying from those to whom you convey
+the Program, the only way you could satisfy both those terms and this
+License would be to refrain entirely from conveying the Program.
+
+  13. Remote Network Interaction; Use with the GNU General Public License.
+
+  Notwithstanding any other provision of this License, if you modify the
+Program, your modified version must prominently offer all users
+interacting with it remotely through a computer network (if your version
+supports such interaction) an opportunity to receive the Corresponding
+Source of your version by providing access to the Corresponding Source
+from a network server at no charge, through some standard or customary
+means of facilitating copying of software.  This Corresponding Source
+shall include the Corresponding Source for any work covered by version 3
+of the GNU General Public License that is incorporated pursuant to the
+following paragraph.
+
+  Notwithstanding any other provision of this License, you have
+permission to link or combine any covered work with a work licensed
+under version 3 of the GNU General Public License into a single
+combined work, and to convey the resulting work.  The terms of this
+License will continue to apply to the part which is the covered work,
+but the work with which it is combined will remain governed by version
+3 of the GNU General Public License.
+
+  14. Revised Versions of this License.
+
+  The Free Software Foundation may publish revised and/or new versions of
+the GNU Affero General Public License from time to time.  Such new versions
+will be similar in spirit to the present version, but may differ in detail to
+address new problems or concerns.
+
+  Each version is given a distinguishing version number.  If the
+Program specifies that a certain numbered version of the GNU Affero General
+Public License "or any later version" applies to it, you have the
+option of following the terms and conditions either of that numbered
+version or of any later version published by the Free Software
+Foundation.  If the Program does not specify a version number of the
+GNU Affero General Public License, you may choose any version ever published
+by the Free Software Foundation.
+
+  If the Program specifies that a proxy can decide which future
+versions of the GNU Affero General Public License can be used, that proxy's
+public statement of acceptance of a version permanently authorizes you
+to choose that version for the Program.
+
+  Later license versions may give you additional or different
+permissions.  However, no additional obligations are imposed on any
+author or copyright holder as a result of your choosing to follow a
+later version.
+
+  15. Disclaimer of Warranty.
+
+  THERE IS NO WARRANTY FOR THE PROGRAM, TO THE EXTENT PERMITTED BY
+APPLICABLE LAW.  EXCEPT WHEN OTHERWISE STATED IN WRITING THE COPYRIGHT
+HOLDERS AND/OR OTHER PARTIES PROVIDE THE PROGRAM "AS IS" WITHOUT WARRANTY
+OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING, BUT NOT LIMITED TO,
+THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+PURPOSE.  THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE PROGRAM
+IS WITH YOU.  SHOULD THE PROGRAM PROVE DEFECTIVE, YOU ASSUME THE COST OF
+ALL NECESSARY SERVICING, REPAIR OR CORRECTION.
+
+  16. Limitation of Liability.
+
+  IN NO EVENT UNLESS REQUIRED BY APPLICABLE LAW OR AGREED TO IN WRITING
+WILL ANY COPYRIGHT HOLDER, OR ANY OTHER PARTY WHO MODIFIES AND/OR CONVEYS
+THE PROGRAM AS PERMITTED ABOVE, BE LIABLE TO YOU FOR DAMAGES, INCLUDING ANY
+GENERAL, SPECIAL, INCIDENTAL OR CONSEQUENTIAL DAMAGES ARISING OUT OF THE
+USE OR INABILITY TO USE THE PROGRAM (INCLUDING BUT NOT LIMITED TO LOSS OF
+DATA OR DATA BEING RENDERED INACCURATE OR LOSSES SUSTAINED BY YOU OR THIRD
+PARTIES OR A FAILURE OF THE PROGRAM TO OPERATE WITH ANY OTHER PROGRAMS),
+EVEN IF SUCH HOLDER OR OTHER PARTY HAS BEEN ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGES.
+
+  17. Interpretation of Sections 15 and 16.
+
+  If the disclaimer of warranty and limitation of liability provided
+above cannot be given local legal effect according to their terms,
+reviewing courts shall apply local law that most closely approximates
+an absolute waiver of all civil liability in connection with the
+Program, unless a warranty or assumption of liability accompanies a
+copy of the Program in return for a fee.
+
+                     END OF TERMS AND CONDITIONS
+
+            How to Apply These Terms to Your New Programs
+
+  If you develop a new program, and you want it to be of the greatest
+possible use to the public, the best way to achieve this is to make it
+free software which everyone can redistribute and change under these terms.
+
+  To do so, attach the following notices to the program.  It is safest
+to attach them to the start of each source file to most effectively
+state the exclusion of warranty; and each file should have at least
+the "copyright" line and a pointer to where the full notice is found.
+
+    <one line to give the program's name and a brief idea of what it does.>
+    Copyright (C) <year>  <name of author>
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU Affero General Public License as published
+    by the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU Affero General Public License for more details.
+
+    You should have received a copy of the GNU Affero General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+Also add information on how to contact you by electronic and paper mail.
+
+  If your software can interact with users remotely through a computer
+network, you should also make sure that it provides a way for users to
+get its source.  For example, if your program is a web application, its
+interface could display a "Source" link that leads users to an archive
+of the code.  There are many ways you could offer source, and different
+solutions will be better for different programs; see section 13 for the
+specific requirements.
+
+  You should also get your employer (if you work as a programmer) or school,
+if any, to sign a "copyright disclaimer" for the program, if necessary.
+For more information on this, and how to apply and follow the GNU AGPL, see
+<https://www.gnu.org/licenses/>.
+
+```
+
+# ./docs/podman.md
+
+```
+# Podman Quadlet Deployment Guide
+
+Deploy services using Podman Quadlets with environment files, optional user scope, and secret-aware mounts.
+
+## Enhancements
+
+- `quadlet_scope` selects system-wide (`/etc/containers/systemd`) or per-user (`~/.config/containers/systemd`) installation.
+- Secrets from the contract populate an environment file and optional `secrets/` directory, mounted read-only into the container.
+- Health checks map directly to `HealthCmd/HealthInterval/HealthTimeout/HealthRetries` derived from `health.cmd`.
+
+## Requirements
+
+```bash
+sudo apt install podman
+ansible-galaxy collection install community.general
+```
+
+Ensure Quadlet is supported:
+
+```bash
+podman info | grep -i quadlet
+```
+
+## Template output
+
+`templates/podman.yml.j2` renders (system scope shown):
+
+```ini
+[Unit]
+Description=Managed container for sample-service
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=docker.io/library/nginx:1.27
+ContainerName=sample-service
+AutoUpdate=registry
+Environment=APP_MODE=production
+Environment=APP_FEATURE_FLAG=true
+EnvironmentFile=/etc/containers/systemd/sample-service.env
+Volume=sample-service-config.volume:/etc/sample-service:Z
+PublishPort=192.0.2.50:8080:8080
+Volume=/etc/containers/systemd/secrets/tls-cert:/etc/sample-service/certs/tls.crt:ro,Z
+HealthCmd=/bin/sh -c exit 0
+HealthInterval=10s
+HealthTimeout=5s
+HealthRetries=3
+
+[Service]
+Restart=always
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target default.target
+```
+
+For `quadlet_scope: user`, the environment file and secrets live under `~/.config/containers/systemd/`. Enable lingering or ensure user services start at boot so the unit remains active.
+
+## Deployment workflow
+
+`roles/common/apply_runtime/tasks/podman.yml`:
+
+1. Computes the target directories based on `quadlet_scope`.
+2. Writes the env file and optional secret files (with `0400` default permissions).
+3. Copies the `.container` unit.
+4. Executes `systemd` tasks with the correct scope and reloads daemons.
+5. Optionally shreds rendered secrets when `secrets.shred_after_apply` is enabled.
+6. Sets `service_ip` for the post-deploy health gate.
+
+Ensure lingering is enabled when deploying user-scoped units:
+
+```bash
+loginctl enable-linger $USER
+systemctl --user daemon-reload
+systemctl --user enable sample-service
+systemctl --user start sample-service
+```
+
+```
+
+# ./docs/proxmox.md
+
+```
+# Proxmox LXC Deployment Guide
+
+Deploy services as LXC containers on Proxmox VE with predictable networking and runtime-agnostic provisioning.
+
+## Key changes
+
+- Templates emit `container_ip`, removing brittle IP parsing in Ansible tasks.
+- LXC containers declare `features: nesting=1,keyctl=1` so Docker/Podman workloads function inside the guest when required.
+- Ansible waits for SSH on `container_ip` (120 seconds) before running delegate tasks.
+- Package installation inside the container uses non-interactive APT and applies any rendered configuration or command hooks.
+
+## Prerequisites
+
+### Proxmox VE
+
+- Proxmox VE 7.0 or newer with API access.
+- Ubuntu 24.04 container template (defaults to `local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst`).
+- Network bridge with reachable gateway.
+
+### Ansible collections
+
+```bash
+ansible-galaxy collection install community.general
+```
+
+`community.general.proxmox` manages LXC lifecycle actions.
+
+## Template snippets
+
+`templates/proxmox.yml.j2` produces output similar to:
+
+```yaml
+---
+container_ip: "192.0.2.50"
+container:
+  vmid: "200"
+  hostname: "sample-service"
+  ostemplate: "local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst"
+  disk: "5"
+  cores: "1"
+  memory: "512"
+  swap: "512"
+  netif:
+    net0: "name=eth0,bridge=vmbr0,ip=192.0.2.50/24,gw=192.0.2.1"
+  onboot: yes
+  unprivileged: yes
+  features: "nesting=1,keyctl=1"
+
+setup:
+  packages:
+    - nginx
+  config:
+    - path: /etc/sample-service/runtime.env
+      content: |
+        APP_MODE=production
+        APP_FEATURE_FLAG=true
+      mode: '0640'
+  services:
+    - name: sample-service
+      enabled: true
+      state: started
+```
+
+## Execution flow
+
+1. Render the template (see `tests/render.yml`).
+2. `roles/common/apply_runtime/tasks/proxmox.yml`:
+   - Creates or updates the container with the declared features.
+   - Waits for SSH on `container_ip:22`.
+   - Installs packages via non-interactive APT when requested.
+   - Copies configuration files and enables systemd services declared in `setup.services`.
+   - Runs any additional shell commands listed in `setup.commands` inside the guest.
+
+## Security notes
+
+- Explicit IP assignments keep host firewalls predictable.
+- Use Proxmox firewall rules or host-level filtering for exposed ports.
+- Keep `features` minimal; remove `nesting` when containerized workloads are not required.
+
+## Troubleshooting
+
+- **Delegation errors** – confirm `container_ip` resolves and SSH is reachable. Increase the `wait_for` timeout for large templates.
+- **Package installation failures** – ensure the container has outbound network access and `DEBIAN_FRONTEND=noninteractive` is accepted.
+
+```
+
+# ./docs/README.md
+
+```
+# Self-Hosted Infrastructure Framework
+
+A runtime-agnostic infrastructure-as-code framework for deploying self-hosted applications across **Proxmox LXC**, **Docker Compose**, **Podman Quadlets**, **Kubernetes**, and **bare-metal systemd** from a single service contract.
+
+## Key Features
+
+- **Write Once, Deploy Anywhere** – render the same service definition into runtime-specific manifests and unit files.
+- **Portable Secrets Handling** – ship environment and file-based secrets with runtime-appropriate permissions, optionally shredding rendered material after adapters finish.
+- **Declarative Service Exports** – advertise connection details (for example URLs, ports, or credentials) through `exports.env` so downstream apps can consume them without service-specific wiring in this repository.
+- **Unified Health Contract** – a single `health.cmd` drives Compose healthchecks, Quadlet probes, Kubernetes readiness/liveness probes, and a post-deploy gate.
+- **Continuous Validation** – GitHub Actions lint Ansible/YAML, render every runtime, and verify the generated artifacts with the runtime CLIs.
+
+## Quick Start
+
+### Install toolchain
+
+```bash
+pip install ansible ansible-lint yamllint jsonschema pyyaml
+ansible-galaxy collection install -r ci/collections-stable.yml
+```
+
+### Render a runtime locally
+
+```bash
+ansible-playbook tests/render.yml -e runtime=docker -e @tests/sample_service.yml
+```
+
+The rendered manifest is written to `/tmp/ansible-runtime/<service_id>/<runtime>.yml` and can be validated with the same commands used in CI (for example `docker compose -f … config`).
+
+## Runtime Guides
+
+- [Proxmox LXC](proxmox.md)
+- [Docker Compose](docker.md)
+- [Podman Quadlet](podman.md)
+- [Kubernetes](kubernetes.md)
+- [Bare-Metal systemd](baremetal.md)
+
+## Service Contract Essentials
+
+Every service definition must provide identifiers, runtime templates, health checks, storage, and exports. A minimal example using the bundled `sample_service.yml` looks like:
+
+```yaml
+service_id: sample-service
+runtime_templates:
+  docker: templates/docker.yml.j2
+  podman: templates/podman.yml.j2
+  proxmox: templates/proxmox.yml.j2
+  kubernetes: templates/kubernetes.yml.j2
+  baremetal: templates/baremetal.yml.j2
+
+exports:
+  env:
+    - name: SAMPLE_SERVICE_URL
+      value: https://sample-service.internal
+      description: Base URL consumers should call.
+
+secrets:
+  shred_after_apply: true
+  env:
+    - name: SAMPLE_SERVICE_TOKEN
+      value: "{{ sample_service_token }}"
+  files:
+    - name: tls-cert
+      target: /etc/sample-service/certs/tls.crt
+      value: "{{ sample_service_tls_cert }}"
+```
+
+Downstream applications consume these exports by resolving them through a dependency registry shared between repositories. Provide the registry as a list of known dependencies either inline (`dependency_registry`) or via `dependency_registry_file`:
+
+```yaml
+# dependency-registry.yml
+dependencies:
+  - sample-service
+  - shared-cache
+```
+
+A dependent service can then declare its expectations and map resolved values (for example through a `dependency_exports` variable populated from the registry and exported environment files):
+
+```yaml
+requires:
+  - sample-service
+
+service_env:
+  - name: UPSTREAM_URL
+    value: "{{ dependency_exports['sample-service'].SAMPLE_SERVICE_URL }}"
+```
+
+The registry keeps validation decoupled from the Ansible inventory while ensuring every declared dependency is fulfilled by an exported contract.
+
+## Additional Options
+
+- `quadlet_scope` – set to `system` (default) or `user` to control where Quadlet units are installed. When using `quadlet_scope: user`, make sure lingering is enabled for the target user or user services are explicitly started at boot.
+- `secrets.shred_after_apply` – remove rendered secret files and env files immediately after the runtime adapter applies changes, leaving only in-memory material behind.
+
+## Continuous Integration
+
+`.github/workflows/ci.yml` performs the following on every push and pull request:
+
+1. Lint YAML (`yamllint`) and Ansible (`ansible-lint`).
+2. Validate `schemas/service.schema.yml` with `jsonschema`.
+3. Render sample manifests for each runtime via `tests/render.yml` and `tests/sample_service.yml`.
+4. Validate the generated artifacts:
+   - `yamllint` for Proxmox config.
+   - `docker compose config` for Compose.
+   - `systemd-analyze verify` for Quadlet and bare-metal service units.
+   - `kubectl apply --dry-run=client --validate=true` for Kubernetes manifests.
+
+Use the same steps locally before submitting changes to keep CI green.
+
+```
+
+# ./docs/service.mermaid
+
+```
+graph LR
+    A[Service Definition] --> B{Requires Dependencies?}
+    B -->|Yes| C[Load Required Services]
+    B -->|No| D[Render Templates]
+    C --> E[Resolve Exports]
+    E --> D
+    D --> F[Apply to Target]
+    F --> G[Health Check]
+    G --> H{Healthy?}
+    H -->|Yes| I[Register Exports]
+    H -->|No| J[Fail Deployment]
+    I --> K[Available for Dependents]
+    
+    style A fill:#e3f2fd
+    style K fill:#c8e6c9
+    style J fill:#ffcdd2
+```
+
+# ./docs/system.mermaid
+
+```
+flowchart TB
+    Start([ansible-playbook deploy.yml]) --> LoadEnv[Load Environment Config]
+    LoadEnv --> LoadService[Load Service Definition]
+    
+    LoadService --> Validate{Validate Schema}
+    Validate -->|Invalid| Error1[❌ Fail: Schema Error]
+    Validate -->|Valid| CheckDeps{Check Dependencies}
+    
+    CheckDeps -->|Missing| Error2[❌ Fail: Missing Dependency]
+    CheckDeps -->|OK| Render[Render Runtime Template]
+    
+    Render --> SelectRuntime{Select Runtime}
+    
+    SelectRuntime -->|lxc| RenderLXC[Generate LXC Config]
+    SelectRuntime -->|compose| RenderCompose[Generate docker-compose.yml]
+    SelectRuntime -->|quadlet| RenderQuadlet[Generate .container file]
+    SelectRuntime -->|k8s| RenderK8s[Generate K8s manifests]
+    SelectRuntime -->|baremetal| RenderSystemd[Generate systemd unit]
+    
+    RenderLXC --> ApplyLXC[Proxmox API: Create Container]
+    RenderCompose --> ApplyCompose[docker-compose up]
+    RenderQuadlet --> ApplyQuadlet[systemctl enable/start]
+    RenderK8s --> ApplyK8s[kubectl apply]
+    RenderSystemd --> ApplySystemd[systemctl enable/start]
+    
+    ApplyLXC --> Setup[Configure Service]
+    ApplyCompose --> Setup
+    ApplyQuadlet --> Setup
+    ApplyK8s --> Setup
+    ApplySystemd --> Setup
+    
+    Setup --> Health{Health Check}
+    Health -->|Fail| Error3[❌ Deployment Failed]
+    Health -->|Pass| Success[✅ Deployment Complete]
+    
+    Success --> Exports[Register Service Exports]
+    Exports --> End([Ready for Dependent Services])
+    
+    style Start fill:#e1f5fe
+    style End fill:#c8e6c9
+    style Error1 fill:#ffcdd2
+    style Error2 fill:#ffcdd2
+    style Error3 fill:#ffcdd2
+    style Success fill:#a5d6a7
+```
+
+# ./roles/common/apply_runtime/handlers/main.yml
+
+```
+---
+- name: Restart service
+  listen: Restart service
+  become: true
+  systemd:
+    name: "{{ service_unit_name | default(service_id) }}"
+    state: restarted
+  delegate_to: "{{ container_ip | default(service_ip | default(inventory_hostname)) }}"
+
+```
+
+# ./roles/common/apply_runtime/tasks/baremetal.yml
+
+```
+---
+- name: Determine service unit name
+  set_fact:
+    effective_service_unit_name: "{{ service_unit_name | default(service_id) }}"
+
+- name: Set service IP facts
+  set_fact:
+    service_ip: "{{ service_ip | default(ansible_default_ipv4.address) }}"
+
+- name: Install service packages
+  become: true
+  apt:
+    name: "{{ service_packages }}"
+    state: present
+    update_cache: yes
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  when: service_packages is defined and service_packages | length > 0
+
+- name: Deploy service configuration files
+  become: true
+  copy:
+    dest: "{{ item.path }}"
+    mode: "{{ item.mode | default('0644') }}"
+    content: "{{ item.content }}"
+  loop: "{{ service_files | default([]) }}"
+  notify: Restart service
+
+- name: Copy systemd unit file
+  become: true
+  copy:
+    src: "{{ runtime_config_path }}"
+    dest: "/etc/systemd/system/{{ effective_service_unit_name }}.service"
+    mode: '0644'
+  notify: Restart service
+
+- name: Reload systemd
+  become: true
+  systemd:
+    daemon_reload: yes
+
+- name: Enable service
+  become: true
+  systemd:
+    name: "{{ effective_service_unit_name }}"
+    enabled: yes
+
+- name: Start service
+  become: true
+  systemd:
+    name: "{{ effective_service_unit_name }}"
+    state: started
+
+- name: Run additional setup commands
+  become: true
+  command: "{{ item }}"
+  loop: "{{ service_commands | default([]) }}"
+  when: service_commands is defined and service_commands | length > 0
+
+```
+
+# ./roles/common/apply_runtime/tasks/docker.yml
+
+```
+---
+- name: Resolve Docker secrets
+  set_fact:
+    compose_secret_env: "{{ secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] }}"
+    compose_secret_files: "{{ secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] }}"
+    compose_secret_env_path: "{{ runtime_output_dir }}/{{ service_name | default(service_id) }}.env"
+    compose_secret_shred: "{{ secrets.shred_after_apply | default(false) if secrets is defined else false }}"
+
+- name: Write Compose secret environment file
+  copy:
+    dest: "{{ runtime_output_dir }}/{{ service_name | default(service_id) }}.env"
+    mode: '0600'
+    content: |-
+      {% for item in compose_secret_env %}
+      {{ item.name }}={{ item.value }}
+      {% endfor %}
+  when: compose_secret_env | length > 0
+  no_log: true
+
+- name: Ensure Compose secret directory exists
+  file:
+    path: "{{ runtime_output_dir }}/secrets"
+    state: directory
+    mode: '0700'
+  when: compose_secret_files | length > 0
+
+- name: Write Compose secret files
+  copy:
+    dest: "{{ runtime_output_dir }}/secrets/{{ item.name }}"
+    mode: "{{ item.mode | default('0400') }}"
+    content: "{{ item.value | default(item.content) }}"
+  loop: "{{ compose_secret_files }}"
+  when: compose_secret_files | length > 0
+  no_log: true
+
+- name: Deploy with Docker Compose v2
+  community.docker.docker_compose_v2:
+    project_src: "{{ runtime_output_dir }}"
+    files:
+      - "{{ runtime_config_path | basename }}"
+    state: present
+    pull: always
+
+- name: Remove Compose secret environment file after apply
+  file:
+    path: "{{ compose_secret_env_path }}"
+    state: absent
+  when:
+    - compose_secret_shred | bool
+    - compose_secret_env | length > 0
+
+- name: Remove Compose secret files after apply
+  file:
+    path: "{{ runtime_output_dir }}/secrets/{{ item.name }}"
+    state: absent
+  loop: "{{ compose_secret_files }}"
+  when:
+    - compose_secret_shred | bool
+    - compose_secret_files | length > 0
+
+- name: Remove Compose secret directory after apply
+  file:
+    path: "{{ runtime_output_dir }}/secrets"
+    state: absent
+  when:
+    - compose_secret_shred | bool
+    - compose_secret_files | length > 0
+
+- name: Set service IP for health checks
+  set_fact:
+    service_ip: "{{ service_ip | default(ansible_default_ipv4.address) }}"
+
+```
+
+# ./roles/common/apply_runtime/tasks/kubernetes.yml
+
+```
+---
+- name: Apply Kubernetes manifests
+  kubernetes.core.k8s:
+    state: present
+    src: "{{ runtime_config_path }}"
+    namespace: "{{ k8s_namespace | default('default') }}"
+```
+
+# ./roles/common/apply_runtime/tasks/main.yml
+
+```
+---
+- name: Execute runtime-specific deployment
+  include_tasks: "{{ runtime }}.yml"
+
+- name: Health check after deployment
+  command: "{{ health.cmd[0] if health.cmd is defined else 'true' }}"
+  args:
+    argv: {{ health.cmd }}
+  delegate_to: "{{ service_ip | default(ansible_default_ipv4.address) }}"
+  retries: {{ health.retries | default(3) }}
+  delay: {{ health.interval | default('10s') | regex_replace('s$', '') | int }}
+  register: health_result
+  until: health_result.rc == 0
+  when: health is defined
+
+- name: Deployment complete
+  debug:
+    msg: "✓ Service {{ service_id }} deployed successfully on {{ runtime }}"
+
+```
+
+# ./roles/common/apply_runtime/tasks/podman.yml
+
+```
+---
+- name: Determine quadlet scope
+  set_fact:
+    quadlet_effective_scope: "{{ quadlet_scope | default('system') }}"
+    quadlet_unit_name: "{{ service_unit_name | default(service_id) }}"
+
+- name: Resolve quadlet paths
+  set_fact:
+    quadlet_base_dir: "{{ (quadlet_effective_scope == 'user') | ternary((ansible_env.HOME | default(lookup('env', 'HOME'))) + '/.config/containers/systemd', '/etc/containers/systemd') }}"
+    quadlet_env_path: "{{ ((quadlet_effective_scope == 'user') | ternary((ansible_env.HOME | default(lookup('env', 'HOME'))) + '/.config/containers/systemd', '/etc/containers/systemd')) + '/' + (service_name | default(service_id)) + '.env' }}"
+    quadlet_secret_dir: "{{ ((quadlet_effective_scope == 'user') | ternary((ansible_env.HOME | default(lookup('env', 'HOME'))) + '/.config/containers/systemd/secrets', '/etc/containers/systemd/secrets')) }}"
+
+- name: Resolve Quadlet secrets
+  set_fact:
+    quadlet_secret_env: "{{ secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] }}"
+    quadlet_secret_files: "{{ secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] }}"
+    quadlet_secret_shred: "{{ secrets.shred_after_apply | default(false) if secrets is defined else false }}"
+
+- name: Deduplicate quadlet secret environment variables
+  set_fact:
+    quadlet_secret_env: >-
+      {{ quadlet_secret_env | reverse | unique(attribute='name') | reverse }}
+  when: quadlet_secret_env | length > 0
+
+- name: Ensure quadlet directory exists
+  file:
+    path: "{{ quadlet_base_dir }}"
+    state: directory
+    mode: '0755'
+  become: {{ (quadlet_effective_scope == 'system') | bool }}
+
+- name: Ensure quadlet secret directory exists
+  file:
+    path: "{{ quadlet_secret_dir }}"
+    state: directory
+    mode: '0700'
+  when: quadlet_secret_files | length > 0
+  become: {{ (quadlet_effective_scope == 'system') | bool }}
+
+- name: Write Quadlet environment file
+  copy:
+    dest: "{{ quadlet_env_path }}"
+    mode: '0600'
+    content: |-
+      {% for item in quadlet_secret_env %}
+      {{ item.name }}={{ item.value }}
+      {% endfor %}
+  when: quadlet_secret_env | length > 0
+  no_log: true
+  become: {{ (quadlet_effective_scope == 'system') | bool }}
+
+- name: Write Quadlet secret files
+  copy:
+    dest: "{{ quadlet_secret_dir }}/{{ item.name }}"
+    mode: "{{ item.mode | default('0400') }}"
+    content: "{{ item.value | default(item.content) }}"
+  loop: "{{ quadlet_secret_files }}"
+  when: quadlet_secret_files | length > 0
+  no_log: true
+  become: {{ (quadlet_effective_scope == 'system') | bool }}
+
+- name: Copy Quadlet container file
+  copy:
+    src: "{{ runtime_config_path }}"
+    dest: "{{ quadlet_base_dir }}/{{ quadlet_unit_name }}.container"
+    mode: '0644'
+  become: {{ (quadlet_effective_scope == 'system') | bool }}
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+    scope: "{{ quadlet_effective_scope }}"
+
+- name: Enable and start container
+  systemd:
+    name: "{{ quadlet_unit_name }}"
+    enabled: yes
+    state: started
+    scope: "{{ quadlet_effective_scope }}"
+
+- name: Remove Quadlet environment file after apply
+  file:
+    path: "{{ quadlet_env_path }}"
+    state: absent
+  when:
+    - quadlet_secret_shred | bool
+    - quadlet_secret_env | length > 0
+  become: {{ (quadlet_effective_scope == 'system') | bool }}
+
+- name: Remove Quadlet secret files after apply
+  file:
+    path: "{{ quadlet_secret_dir }}/{{ item.name }}"
+    state: absent
+  loop: "{{ quadlet_secret_files }}"
+  when:
+    - quadlet_secret_shred | bool
+    - quadlet_secret_files | length > 0
+  no_log: true
+  become: {{ (quadlet_effective_scope == 'system') | bool }}
+
+- name: Remove Quadlet secret directory after apply
+  file:
+    path: "{{ quadlet_secret_dir }}"
+    state: absent
+  when:
+    - quadlet_secret_shred | bool
+    - quadlet_secret_files | length > 0
+  become: {{ (quadlet_effective_scope == 'system') | bool }}
+
+- name: Set service IP for health checks
+  set_fact:
+    service_ip: "{{ service_ip | default(ansible_default_ipv4.address) }}"
+
+```
+
+# ./roles/common/apply_runtime/tasks/proxmox.yml
+
+```
+---
+- name: Load LXC configuration
+  set_fact:
+    lxc_config: "{{ lookup('file', runtime_config_path) | from_yaml }}"
+
+- name: Ensure container_ip is defined
+  assert:
+    that:
+      - lxc_config.container_ip is defined
+      - lxc_config.container_ip | length > 0
+    fail_msg: "Rendered Proxmox configuration must define container_ip"
+
+- name: Set container IP facts
+  set_fact:
+    container_ip: "{{ lxc_config.container_ip }}"
+    service_ip: "{{ lxc_config.container_ip }}"
+
+- name: Create LXC container
+  community.general.proxmox:
+    vmid: "{{ lxc_config.container.vmid }}"
+    hostname: "{{ lxc_config.container.hostname }}"
+    node: "{{ proxmox_node }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_password: "{{ proxmox_api_password }}"
+    api_host: "{{ proxmox_api_host }}"
+    ostemplate: "{{ lxc_config.container.ostemplate }}"
+    disk: "{{ lxc_config.container.disk }}"
+    cores: "{{ lxc_config.container.cores }}"
+    memory: "{{ lxc_config.container.memory }}"
+    swap: "{{ lxc_config.container.swap }}"
+    netif: "{{ lxc_config.container.netif }}"
+    onboot: "{{ lxc_config.container.onboot }}"
+    unprivileged: "{{ lxc_config.container.unprivileged }}"
+    features: "{{ lxc_config.container.features | default('nesting=1,keyctl=1') }}"
+    state: present
+
+- name: Start container
+  community.general.proxmox:
+    vmid: "{{ lxc_config.container.vmid }}"
+    node: "{{ proxmox_node }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_password: "{{ proxmox_api_password }}"
+    api_host: "{{ proxmox_api_host }}"
+    state: started
+
+- name: Wait for container SSH
+  wait_for:
+    host: "{{ container_ip }}"
+    port: 22
+    timeout: 120
+
+- name: Install packages in container
+  delegate_to: "{{ container_ip }}"
+  become: true
+  apt:
+    name: "{{ lxc_config.setup.packages | default([]) }}"
+    state: present
+    update_cache: yes
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  when: lxc_config.setup.packages is defined and lxc_config.setup.packages | length > 0
+
+- name: Write config files
+  delegate_to: "{{ container_ip }}"
+  become: true
+  copy:
+    content: "{{ item.content }}"
+    dest: "{{ item.path }}"
+    mode: "{{ item.mode | default('0644') }}"
+  loop: "{{ lxc_config.setup.config | default([]) }}"
+
+- name: Enable and start services
+  delegate_to: "{{ container_ip }}"
+  become: true
+  systemd:
+    name: "{{ item.name }}"
+    enabled: "{{ item.enabled | default(true) }}"
+    state: "{{ item.state | default('started') }}"
+    daemon_reload: true
+  loop: "{{ lxc_config.setup.services | default([]) }}"
+
+- name: Run additional setup commands
+  delegate_to: "{{ container_ip }}"
+  become: true
+  command: "{{ item }}"
+  loop: "{{ lxc_config.setup.commands | default([]) }}"
+  when: lxc_config.setup.commands is defined and lxc_config.setup.commands | length > 0
+
+```
+
+# ./roles/common/render_runtime/tasks/main.yml
+
+```
+---
+- name: Check if runtime is supported
+  assert:
+    that:
+      - runtime in runtime_templates.keys()
+    fail_msg: "Runtime {{ runtime }} not supported by service {{ service_id }}"
+
+- name: Get template path for runtime
+  set_fact:
+    runtime_template: "{{ runtime_templates[runtime] }}"
+    runtime_output_dir: "/tmp/ansible-runtime/{{ service_id }}"
+
+- name: Create output directory
+  file:
+    path: "{{ runtime_output_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Render runtime configuration
+  template:
+    src: "{{ runtime_template }}"
+    dest: "{{ runtime_output_dir }}/{{ runtime }}.yml"
+  register: rendered_config
+
+- name: Set runtime output path
+  set_fact:
+    runtime_config_path: "{{ rendered_config.dest }}"
+
+- name: Runtime rendered
+  debug:
+    msg: "✓ Rendered {{ service_id }} for {{ runtime }} runtime at {{ runtime_config_path }}"
+```
+
+# ./roles/common/validate_schema/tasks/main.yml
+
+```
+---
+- name: Load service schema
+  set_fact:
+    service_schema: "{{ lookup('file', '../../schemas/service.schema.yml') | from_yaml }}"
+
+- name: Validate service contract exists
+  assert:
+    that:
+      - service_id is defined
+      - service_name is defined
+      - service_image is defined
+      - exports is defined
+      - storage is defined
+      - health is defined
+      - runtime_templates is defined
+    fail_msg: "Service {{ service_id | default('unknown') }} is missing required contract fields"
+
+- name: Initialize dependency registry
+  set_fact:
+    dependency_registry_entries: []
+
+- name: Load dependency registry from file
+  set_fact:
+    dependency_registry_source: "{{ lookup('file', dependency_registry_file) | from_yaml }}"
+  when: dependency_registry_file is defined
+
+- name: Normalize dependency registry from file
+  set_fact:
+    dependency_registry_entries: >-
+      {{
+        dependency_registry_entries
+        + (
+          dependency_registry_source.dependencies
+          if (dependency_registry_source is mapping and dependency_registry_source.dependencies is defined)
+          else (
+            dependency_registry_source.keys() | list
+            if dependency_registry_source is mapping
+            else (
+              [dependency_registry_source]
+              if dependency_registry_source is string
+              else (dependency_registry_source | default([]))
+            )
+          )
+        )
+      }}
+  when: dependency_registry_file is defined
+
+- name: Append inline dependency registry entries
+  set_fact:
+    dependency_registry_entries: >-
+      {{
+        dependency_registry_entries
+        + (
+          [dependency_registry]
+          if dependency_registry is string
+          else (dependency_registry | default([]))
+        )
+      }}
+  when: dependency_registry is defined
+
+- name: Deduplicate dependency registry entries
+  set_fact:
+    dependency_registry_entries: "{{ dependency_registry_entries | default([]) | unique }}"
+
+- name: Validate required dependencies exist
+  assert:
+    that:
+      - item in dependency_registry_entries
+    fail_msg: >-
+      Required dependency {{ item }} not found in dependency registry. Provide
+      dependency_registry or dependency_registry_file with available exports.
+  loop: "{{ requires | default([]) }}"
+  when: requires is defined and requires | length > 0
+
+- name: Service contract validated
+  debug:
+    msg: "✓ Service {{ service_id }} contract is valid"
+
+```
+
+# ./roles/docker_host/defaults/main.yml
+
+```
+---
+docker_host_users: []  # list of usernames to add to docker group
+docker_host_enable_service: true
+docker_host_daemon_config: {}
+docker_host_compose_version: latest
+
+```
+
+# ./roles/docker_host/handlers/main.yml
+
+```
+---
+- name: Restart docker
+  ansible.builtin.systemd:
+    name: docker
+    state: restarted
+  when: ansible_service_mgr == 'systemd'
+
+```
+
+# ./roles/docker_host/tasks/common.yml
+
+```
+---
+- name: Ensure docker group exists
+  ansible.builtin.group:
+    name: docker
+    state: present
+
+- name: Add users to docker group
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: docker
+    append: true
+  loop: "{{ docker_host_users }}"
+  when: docker_host_users | length > 0
+
+- name: Configure Docker daemon JSON when specified
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: "{{ docker_host_daemon_config | to_nice_json(indent=2) }}\n"
+    owner: root
+    group: root
+    mode: '0644'
+  when: docker_host_daemon_config | length > 0
+  notify: Restart docker
+
+- name: Ensure docker service is enabled on systemd hosts
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: true
+  when:
+    - docker_host_enable_service
+    - ansible_service_mgr == 'systemd'
+
+- name: Check for docker compose plugin
+  ansible.builtin.stat:
+    path: /usr/libexec/docker/cli-plugins/docker-compose
+  register: docker_compose_plugin
+  when: ansible_os_family == 'RedHat'
+
+- name: Enable docker-compose compatibility symlink when needed
+  ansible.builtin.file:
+    src: /usr/libexec/docker/cli-plugins/docker-compose
+    dest: /usr/local/bin/docker-compose
+    state: link
+  when:
+    - ansible_os_family == 'RedHat'
+    - docker_host_enable_service
+    - docker_compose_plugin is defined
+    - docker_compose_plugin.stat.exists
+
+
+```
+
+# ./roles/docker_host/tasks/debian.yml
+
+```
+---
+- name: Ensure apt prerequisites are present
+  ansible.builtin.apt:
+    name: "{{ docker_host_prereq_packages.get(ansible_distribution, docker_host_prereq_packages.get(ansible_os_family, [])) }}"
+    state: present
+    update_cache: true
+
+- name: Create docker apt key directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+
+- name: Determine Docker repository architecture label
+  ansible.builtin.set_fact:
+    docker_host_arch: "{{ 'arm64' if ansible_architecture in ['aarch64', 'arm64'] else 'amd64' }}"
+
+- name: Install Docker repository GPG key
+  ansible.builtin.get_url:
+    url: "https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg"
+    dest: /etc/apt/keyrings/docker.gpg
+    mode: '0644'
+
+- name: Configure Docker APT repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/docker.list
+    content: |
+      deb [arch={{ docker_host_arch }} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/{{ ansible_distribution | lower }} {{ ansible_distribution_release | lower }} stable
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Update apt cache for Docker packages
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: Install Docker engine components
+  ansible.builtin.apt:
+    name: "{{ docker_host_package_map.get(ansible_distribution, docker_host_package_map.get(ansible_os_family, [])) }}"
+    state: present
+
+```
+
+# ./roles/docker_host/tasks/main.yml
+
+```
+---
+- name: Include Debian family setup
+  ansible.builtin.include_tasks: debian.yml
+  when: ansible_os_family == 'Debian'
+
+- name: Include Red Hat family setup
+  ansible.builtin.include_tasks: redhat.yml
+  when: ansible_os_family == 'RedHat'
+
+- name: Include common Docker configuration
+  ansible.builtin.import_tasks: common.yml
+
+```
+
+# ./roles/docker_host/tasks/redhat.yml
+
+```
+---
+- name: Ensure Docker prerequisites present on Red Hat hosts
+  ansible.builtin.dnf:
+    name: "{{ docker_host_prereq_packages.get(ansible_distribution, docker_host_prereq_packages.get('AlmaLinux', [])) }}"
+    state: present
+    update_cache: true
+
+- name: Configure Docker CE repository
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/centos/docker-ce.repo
+    dest: /etc/yum.repos.d/docker-ce.repo
+    mode: '0644'
+
+- name: Install Docker engine packages
+  ansible.builtin.dnf:
+    name: "{{ docker_host_package_map.get(ansible_distribution, docker_host_package_map.get('AlmaLinux', [])) }}"
+    state: present
+    enablerepo: docker-ce-stable
+
+- name: Ensure docker service is enabled
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: true
+  when: docker_host_enable_service
+
+```
+
+# ./roles/docker_host/vars/main.yml
+
+```
+---
+docker_host_prereq_packages:
+  Debian:
+    - ca-certificates
+    - curl
+    - gnupg
+    - lsb-release
+  Ubuntu:
+    - ca-certificates
+    - curl
+    - gnupg
+    - lsb-release
+  AlmaLinux:
+    - yum-utils
+    - device-mapper-persistent-data
+    - lvm2
+docker_host_package_map:
+  Debian:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+    - docker-buildx-plugin
+    - docker-compose-plugin
+  Ubuntu:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+    - docker-buildx-plugin
+    - docker-compose-plugin
+  AlmaLinux:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+    - docker-buildx-plugin
+    - docker-compose-plugin
+
+```
+
+# ./roles/kubernetes_host/defaults/main.yml
+
+```
+---
+kubernetes_version: "1.29"
+kubernetes_cni_packages:
+  - containerd
+kubernetes_control_plane: false
+kubernetes_sysctl_settings:
+  - { name: 'net.bridge.bridge-nf-call-iptables', value: '1' }
+  - { name: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
+  - { name: 'net.ipv4.ip_forward', value: '1' }
+
+```
+
+# ./roles/kubernetes_host/handlers/main.yml
+
+```
+---
+- name: Restart containerd
+  ansible.builtin.systemd:
+    name: containerd
+    state: restarted
+  when: ansible_service_mgr == 'systemd'
+
+- name: Restart kubelet
+  ansible.builtin.systemd:
+    name: kubelet
+    state: restarted
+  when: ansible_service_mgr == 'systemd'
+
+```
+
+# ./roles/kubernetes_host/tasks/common.yml
+
+```
+---
+- name: Disable swap immediately
+  ansible.builtin.command: swapoff -a
+  changed_when: false
+  failed_when: false
+
+- name: Comment swap entries in fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\sswap\s.*)$'
+    replace: '# \1'
+  register: swap_comment
+  notify: Restart kubelet
+  failed_when: false
+
+- name: Ensure kernel modules are loaded
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/kubernetes.conf
+    content: |
+      overlay
+      br_netfilter
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart containerd
+
+- name: Load overlay module
+  ansible.builtin.modprobe:
+    name: overlay
+    state: present
+
+- name: Load br_netfilter module
+  ansible.builtin.modprobe:
+    name: br_netfilter
+    state: present
+
+- name: Apply Kubernetes sysctl settings
+  ansible.builtin.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_set: true
+    reload: true
+  loop: "{{ kubernetes_sysctl_settings }}"
+
+- name: Ensure containerd configuration directory exists
+  ansible.builtin.file:
+    path: /etc/containerd
+    state: directory
+    mode: '0755'
+
+- name: Check for existing containerd configuration
+  ansible.builtin.stat:
+    path: /etc/containerd/config.toml
+  register: containerd_config
+  when: ansible_facts.packages.get('containerd') is defined or 'containerd' in kubernetes_cni_packages
+
+- name: Generate default containerd configuration
+  ansible.builtin.command: containerd config default
+  register: containerd_default_config
+  changed_when: containerd_default_config.rc == 0
+  when:
+    - containerd_config is defined
+    - not containerd_config.stat.exists
+
+- name: Write containerd configuration to disk
+  ansible.builtin.copy:
+    dest: /etc/containerd/config.toml
+    content: "{{ containerd_default_config.stdout }}\n"
+    owner: root
+    group: root
+    mode: '0644'
+  when: containerd_default_config is defined
+  notify: Restart containerd
+
+- name: Mark containerd configuration as present
+  ansible.builtin.set_fact:
+    containerd_config:
+      stat:
+        exists: true
+  when: containerd_default_config is defined
+
+- name: Ensure containerd uses systemd cgroups
+  ansible.builtin.replace:
+    path: /etc/containerd/config.toml
+    regexp: 'SystemdCgroup = false'
+    replace: 'SystemdCgroup = true'
+  notify: Restart containerd
+  when: containerd_config is defined and containerd_config.stat.exists
+
+- name: Enable containerd service
+  ansible.builtin.systemd:
+    name: containerd
+    state: started
+    enabled: true
+  when: ansible_service_mgr == 'systemd'
+
+- name: Enable kubelet service
+  ansible.builtin.systemd:
+    name: kubelet
+    enabled: true
+    state: started
+  when: ansible_service_mgr == 'systemd'
+
+```
+
+# ./roles/kubernetes_host/tasks/debian.yml
+
+```
+---
+- name: Install Kubernetes prerequisites on Debian family
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+    update_cache: true
+
+- name: Ensure apt key directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+
+- name: Download Kubernetes Release key
+  ansible.builtin.get_url:
+    url: "{{ kubernetes_repo_base.get(ansible_distribution, kubernetes_repo_base.get(ansible_os_family, '')) }}Release.key"
+    dest: /etc/apt/keyrings/kubernetes-release.key
+    mode: '0644'
+
+- name: Convert Kubernetes key to keyring format
+  ansible.builtin.command: gpg --dearmor --yes -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg /etc/apt/keyrings/kubernetes-release.key
+  args:
+    creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+- name: Configure Kubernetes apt repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/kubernetes.list
+    content: |
+      deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] {{ kubernetes_repo_base.get(ansible_distribution, kubernetes_repo_base.get(ansible_os_family, '')) }} /
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Update apt cache for Kubernetes packages
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: Install container runtime packages
+  ansible.builtin.apt:
+    name: "{{ kubernetes_cni_packages }}"
+    state: present
+
+- name: Install Kubernetes components
+  ansible.builtin.apt:
+    name: "{{ kubernetes_packages.get(ansible_distribution, kubernetes_packages.get(ansible_os_family, [])) }}"
+    state: present
+
+- name: Hold Kubernetes packages at current version
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: "{{ kubernetes_packages.get(ansible_distribution, kubernetes_packages.get(ansible_os_family, [])) }}"
+
+```
+
+# ./roles/kubernetes_host/tasks/main.yml
+
+```
+---
+- name: Gather package facts for Kubernetes role
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Include Debian family Kubernetes setup
+  ansible.builtin.include_tasks: debian.yml
+  when: ansible_os_family == 'Debian'
+
+- name: Include Red Hat family Kubernetes setup
+  ansible.builtin.include_tasks: redhat.yml
+  when: ansible_os_family == 'RedHat'
+
+- name: Apply common Kubernetes host configuration
+  ansible.builtin.import_tasks: common.yml
+
+```
+
+# ./roles/kubernetes_host/tasks/redhat.yml
+
+```
+---
+- name: Install Kubernetes prerequisites on Red Hat family
+  ansible.builtin.dnf:
+    name:
+      - curl
+      - gnupg2
+      - iptables
+      - ebtables
+    state: present
+    update_cache: true
+
+- name: Enable Kubernetes repository gpg key
+  ansible.builtin.get_url:
+    url: "{{ kubernetes_repo_base.get(ansible_distribution, kubernetes_repo_base.get('AlmaLinux')) }}repodata/repomd.xml.key"
+    dest: /etc/pki/rpm-gpg/RPM-GPG-KEY-kubernetes
+    mode: '0644'
+
+- name: Import Kubernetes GPG key
+  ansible.builtin.rpm_key:
+    state: present
+    key: /etc/pki/rpm-gpg/RPM-GPG-KEY-kubernetes
+
+- name: Configure Kubernetes repository
+  ansible.builtin.copy:
+    dest: /etc/yum.repos.d/kubernetes.repo
+    content: |
+      [kubernetes]
+      name=Kubernetes
+      baseurl={{ kubernetes_repo_base.get(ansible_distribution, kubernetes_repo_base.get('AlmaLinux')) }}
+      enabled=1
+      gpgcheck=1
+      gpgkey={{ kubernetes_repo_base.get(ansible_distribution, kubernetes_repo_base.get('AlmaLinux')) }}repodata/repomd.xml.key
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Install container runtime packages
+  ansible.builtin.dnf:
+    name: "{{ kubernetes_cni_packages }}"
+    state: present
+
+- name: Install Kubernetes components
+  ansible.builtin.dnf:
+    name: "{{ kubernetes_packages.get(ansible_distribution, kubernetes_packages.get('AlmaLinux', [])) }}"
+    state: present
+
+```
+
+# ./roles/kubernetes_host/vars/main.yml
+
+```
+---
+kubernetes_packages:
+  Debian:
+    - kubelet
+    - kubeadm
+    - kubectl
+  Ubuntu:
+    - kubelet
+    - kubeadm
+    - kubectl
+  AlmaLinux:
+    - kubelet
+    - kubeadm
+    - kubectl
+kubernetes_repo_base:
+  Debian: https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_version }}/deb/
+  Ubuntu: https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_version }}/deb/
+  AlmaLinux: https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_version }}/rpm/
+
+```
+
+# ./roles/podman_host/defaults/main.yml
+
+```
+---
+podman_host_user: podman
+podman_host_user_shell: /bin/bash
+podman_host_user_comment: Podman Service User
+podman_host_uid_range_start: 100000
+podman_host_uid_range_size: 65536
+podman_host_runtime_path: /usr/bin/podman
+podman_host_secure_wrapper_path: /usr/local/bin/secure-podman
+podman_host_log_dir: /var/log/containers
+podman_host_enable_firewalld: true
+podman_host_firewalld_zone: trusted
+podman_host_cron_minute: 0
+podman_host_cron_hour: 2
+podman_host_prune_command: /usr/bin/podman system prune -f
+
+```
+
+# ./roles/podman_host/tasks/common.yml
+
+```
+---
+- name: Ensure Podman service user exists
+  ansible.builtin.user:
+    name: "{{ podman_host_user }}"
+    comment: "{{ podman_host_user_comment }}"
+    shell: "{{ podman_host_user_shell }}"
+    create_home: true
+    password_lock: true
+
+- name: Add Podman user to systemd-journal group
+  ansible.builtin.user:
+    name: "{{ podman_host_user }}"
+    groups: systemd-journal
+    append: true
+  ignore_errors: true
+
+- name: Configure subuid allocation for Podman user
+  ansible.builtin.lineinfile:
+    path: /etc/subuid
+    create: true
+    line: "{{ podman_host_user }}:{{ podman_host_uid_range_start }}:{{ podman_host_uid_range_size }}"
+    state: present
+
+- name: Configure subgid allocation for Podman user
+  ansible.builtin.lineinfile:
+    path: /etc/subgid
+    create: true
+    line: "{{ podman_host_user }}:{{ podman_host_uid_range_start }}:{{ podman_host_uid_range_size }}"
+    state: present
+
+- name: Lookup Podman user UID
+  ansible.builtin.command: "id -u {{ podman_host_user }}"
+  register: podman_uid_lookup
+  changed_when: false
+
+- name: Set Podman UID fact
+  ansible.builtin.set_fact:
+    podman_host_uid: "{{ podman_uid_lookup.stdout | int }}"
+
+- name: Ensure Podman configuration directory exists
+  ansible.builtin.file:
+    path: "/home/{{ podman_host_user }}/.config/containers"
+    state: directory
+    owner: "{{ podman_host_user }}"
+    group: "{{ podman_host_user }}"
+    mode: '0750'
+
+- name: Deploy rootless containers configuration
+  ansible.builtin.template:
+    src: containers.conf.j2
+    dest: "/home/{{ podman_host_user }}/.config/containers/containers.conf"
+    owner: "{{ podman_host_user }}"
+    group: "{{ podman_host_user }}"
+    mode: '0640'
+
+- name: Deploy rootless storage configuration
+  ansible.builtin.template:
+    src: storage.conf.j2
+    dest: "/home/{{ podman_host_user }}/.config/containers/storage.conf"
+    owner: "{{ podman_host_user }}"
+    group: "{{ podman_host_user }}"
+    mode: '0640'
+
+- name: Deploy container policy configuration
+  ansible.builtin.template:
+    src: policy.json.j2
+    dest: /etc/containers/policy.json
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Ensure Podman log directory exists
+  ansible.builtin.file:
+    path: "{{ podman_host_log_dir }}"
+    state: directory
+    owner: "{{ podman_host_user }}"
+    group: "{{ podman_host_user }}"
+    mode: '0750'
+
+- name: Install Podman security wrapper
+  ansible.builtin.template:
+    src: secure-podman.sh.j2
+    dest: "{{ podman_host_secure_wrapper_path }}"
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Ensure Podman runtime directory exists
+  ansible.builtin.file:
+    path: "/run/user/{{ podman_host_uid }}"
+    state: directory
+    owner: "{{ podman_host_user }}"
+    group: "{{ podman_host_user }}"
+    mode: '0700'
+
+- name: Configure tmpfiles entry for Podman runtime
+  ansible.builtin.template:
+    src: tmpfiles.conf.j2
+    dest: "/etc/tmpfiles.d/{{ podman_host_user }}.conf"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Apply tmpfiles configuration
+  ansible.builtin.command: "systemd-tmpfiles --create /etc/tmpfiles.d/{{ podman_host_user }}.conf"
+  changed_when: false
+  failed_when: false
+
+- name: Enable lingering for Podman user
+  ansible.builtin.command: "loginctl enable-linger {{ podman_host_user }}"
+  args:
+    creates: "/var/lib/systemd/linger/{{ podman_host_user }}"
+  when: ansible_service_mgr == 'systemd'
+
+- name: Enable Podman socket for service user
+  ansible.builtin.systemd:
+    name: podman.socket
+    scope: user
+    state: started
+    enabled: true
+  become: true
+  become_user: "{{ podman_host_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ podman_host_uid }}"
+  when: ansible_service_mgr == 'systemd'
+
+- name: Harden Podman home permissions
+  ansible.builtin.file:
+    path: "/home/{{ podman_host_user }}"
+    state: directory
+    owner: "{{ podman_host_user }}"
+    group: "{{ podman_host_user }}"
+    mode: '0700'
+
+- name: Ensure Podman containers configuration directory permissions
+  ansible.builtin.file:
+    path: "/home/{{ podman_host_user }}/.config/containers"
+    state: directory
+    owner: "{{ podman_host_user }}"
+    group: "{{ podman_host_user }}"
+    mode: '0750'
+    recurse: true
+
+- name: Configure weekly Podman cleanup cron job
+  ansible.builtin.cron:
+    name: Podman system prune
+    minute: "{{ podman_host_cron_minute }}"
+    hour: "{{ podman_host_cron_hour }}"
+    weekday: 0
+    job: "{{ podman_host_prune_command }}"
+    user: "{{ podman_host_user }}"
+
+```
+
+# ./roles/podman_host/tasks/debian.yml
+
+```
+---
+- name: Update apt cache for Podman host
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Upgrade packages on Podman host
+  ansible.builtin.apt:
+    upgrade: dist
+    autoremove: true
+
+- name: Install Podman dependencies on Debian family
+  ansible.builtin.apt:
+    name: "{{ podman_host_packages.get(ansible_distribution, podman_host_packages.get(ansible_os_family, [])) }}"
+    state: present
+
+```
+
+# ./roles/podman_host/tasks/main.yml
+
+```
+---
+- name: Include operating system specific setup
+  ansible.builtin.include_tasks: "{{ 'debian.yml' if ansible_os_family == 'Debian' else 'redhat.yml' }}"
+  when: ansible_os_family in ['Debian', 'RedHat']
+
+- name: Include common Podman configuration
+  ansible.builtin.import_tasks: common.yml
+
+```
+
+# ./roles/podman_host/tasks/redhat.yml
+
+```
+---
+- name: Update packages on Podman host
+  ansible.builtin.dnf:
+    name: "*"
+    state: latest
+    update_cache: true
+
+- name: Install Podman dependencies on Red Hat family
+  ansible.builtin.dnf:
+    name: "{{ podman_host_packages.get(ansible_distribution, podman_host_packages.get('AlmaLinux', [])) }}"
+    state: present
+    disable_gpg_check: false
+
+- name: Ensure firewalld is installed for Podman networking
+  ansible.builtin.dnf:
+    name: firewalld
+    state: present
+
+- name: Enable firewalld for Podman hosts
+  ansible.builtin.systemd:
+    name: firewalld
+    state: started
+    enabled: true
+  when: podman_host_enable_firewalld
+
+- name: Permit Podman bridge interfaces through firewalld
+  ansible.posix.firewalld:
+    zone: "{{ podman_host_firewalld_zone }}"
+    state: enabled
+    interface: "{{ item }}"
+    permanent: true
+    immediate: true
+  loop:
+    - cni-podman0
+    - podman0
+  when: podman_host_enable_firewalld
+  ignore_errors: true
+
+- name: Allow masquerading for Podman networking
+  ansible.posix.firewalld:
+    zone: public
+    masquerade: true
+    state: enabled
+    permanent: true
+    immediate: true
+  when: podman_host_enable_firewalld
+  ignore_errors: true
+
+```
+
+# ./roles/podman_host/templates/containers.conf.j2
+
+```
+[engine]
+runtime = "crun"
+cgroup_manager = "systemd"
+events_logger = "journald"
+log_driver = "k8s-file"
+[engine.runtimes]
+
+```
+
+# ./roles/podman_host/templates/policy.json.j2
+
+```
+{
+  "default": [
+    {
+      "type": "insecureAcceptAnything"
+    }
+  ],
+  "transports": {
+    "docker-daemon": {
+      "": [
+        {
+          "type": "insecureAcceptAnything"
+        }
+      ]
+    }
+  }
+}
+
+```
+
+# ./roles/podman_host/templates/secure-podman.sh.j2
+
+```
+#!/bin/sh
+if [ "$(id -u)" -eq 0 ]; then
+  printf "Error: Do not run containers as root!\n" >&2
+  exit 1
+fi
+exec "{{ podman_host_runtime_path }}" --log-level=info --syslog "$@"
+
+```
+
+# ./roles/podman_host/templates/storage.conf.j2
+
+```
+[storage]
+driver = "overlay"
+runroot = "/run/user/{{ podman_host_uid }}/containers"
+graphroot = "/home/{{ podman_host_user }}/.local/share/containers/storage"
+[storage.options]
+additionalimagestores = []
+[storage.options.overlay]
+mount_program = "/usr/bin/fuse-overlayfs"
+
+```
+
+# ./roles/podman_host/templates/tmpfiles.conf.j2
+
+```
+d /run/user/{{ podman_host_uid }} 0700 {{ podman_host_user }} {{ podman_host_user }} -
+
+```
+
+# ./roles/podman_host/vars/main.yml
+
+```
+---
+podman_host_packages:
+  Debian:
+    - podman
+    - cockpit-podman
+    - uidmap
+    - slirp4netns
+    - fuse-overlayfs
+    - acl
+  Ubuntu:
+    - podman
+    - cockpit-podman
+    - uidmap
+    - slirp4netns
+    - fuse-overlayfs
+    - acl
+  AlmaLinux:
+    - podman
+    - cockpit-podman
+    - containers-common
+    - fuse-overlayfs
+    - slirp4netns
+    - acl
+    - shadow-utils
+    - shadow-utils-subid
+
+```
+
+# ./roles/system_hardening/defaults/main.yml
+
+```
+---
+hardening_ssh_port: 6922
+hardening_authorized_users: []  # list of {name: user, key: ssh-rsa ...}
+hardening_fail2ban_maxretry: 3
+hardening_fail2ban_bantime: 3600
+hardening_fail2ban_findtime: 600
+hardening_enable_ipv6: false
+hardening_weekly_aide_check_minute: 0
+hardening_weekly_aide_check_hour: 3
+hardening_weekly_aide_check_day: 1
+hardening_disable_services:
+  - bluetooth.service
+  - cups.service
+hardening_additional_disable_services: []
+hardening_aide_init_timeout: 1800
+hardening_use_async_aide: true
+hardening_ipv6_disable_targets:
+  - net.ipv6.conf.all.disable_ipv6
+  - net.ipv6.conf.default.disable_ipv6
+  - net.ipv6.conf.lo.disable_ipv6
+hardening_sysctl_common:
+  - { name: 'net.ipv4.conf.all.accept_redirects', value: '0' }
+  - { name: 'net.ipv4.conf.all.send_redirects', value: '0' }
+  - { name: 'net.ipv4.conf.all.accept_source_route', value: '0' }
+  - { name: 'net.ipv4.icmp_echo_ignore_broadcasts', value: '1' }
+  - { name: 'net.ipv4.tcp_syncookies', value: '1' }
+  - { name: 'net.ipv4.conf.all.rp_filter', value: '1' }
+  - { name: 'net.ipv4.conf.default.rp_filter', value: '1' }
+  - { name: 'net.ipv4.conf.all.log_martians', value: '1' }
+  - { name: 'kernel.randomize_va_space', value: '2' }
+  - { name: 'kernel.panic', value: '10' }
+  - { name: 'kernel.yama.ptrace_scope', value: '1' }
+hardening_umask_targets:
+  - /etc/profile
+  - /etc/bash.bashrc
+  - /etc/zsh/zshrc
+hardening_aide_db_path: /var/lib/aide/aide.db.gz
+hardening_aide_new_db_path: /var/lib/aide/aide.db.new.gz
+hardening_firewalld_zone: public
+hardening_firewalld_services:
+  - cockpit
+hardening_firewalld_ports: []
+
+```
+
+# ./roles/system_hardening/handlers/main.yml
+
+```
+---
+- name: Restart SSH service
+  ansible.builtin.service:
+    name: "{{ 'sshd' if ansible_os_family == 'RedHat' else 'ssh' }}"
+    state: restarted
+
+- name: Validate sudoers configuration
+  ansible.builtin.command: visudo -cf /etc/sudoers
+  changed_when: false
+
+```
+
+# ./roles/system_hardening/tasks/common.yml
+
+```
+---
+- name: Resolve package set for distribution
+  ansible.builtin.set_fact:
+    hardening_package_target: "{{ hardening_packages_common.get(ansible_distribution, hardening_packages_common.get(ansible_os_family, [])) }}"
+
+- name: Ensure base hardening packages are installed
+  ansible.builtin.package:
+    name: "{{ hardening_package_target }}"
+    state: present
+  when: hardening_package_target | length > 0
+
+- name: Check for existing AIDE database
+  ansible.builtin.stat:
+    path: "{{ hardening_aide_db_path }}"
+  register: hardening_aide_db
+
+- name: Lock root password login
+  ansible.builtin.user:
+    name: root
+    password_lock: true
+
+- name: Apply kernel and network sysctl hardening
+  ansible.builtin.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_set: true
+    reload: true
+  loop: "{{ hardening_sysctl_common }}"
+
+- name: Disable IPv6 when requested
+  ansible.builtin.sysctl:
+    name: "{{ item }}"
+    value: '1'
+    sysctl_set: true
+    reload: true
+  loop: "{{ hardening_ipv6_disable_targets }}"
+  when: not hardening_enable_ipv6
+
+- name: Configure SSH daemon hardening drop-in
+  ansible.builtin.template:
+    src: ssh_hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/hardening.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart SSH service
+
+- name: Ensure privileged separation directory exists
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - /run/sshd
+    - /var/run/sshd
+    - /var/empty/sshd
+
+- name: Configure sudoers timeout policy
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/timeout
+    content: |-
+      Defaults timestamp_timeout=5
+    owner: root
+    group: root
+    mode: '0440'
+  notify: Validate sudoers configuration
+
+- name: Configure sudo cockpit exception
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/cockpit
+    content: |-
+      Defaults:cockpit !authenticate
+    owner: root
+    group: root
+    mode: '0440'
+  notify: Validate sudoers configuration
+
+- name: Require TTY for sudo invocations
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/requiretty
+    content: |-
+      Defaults requiretty
+    owner: root
+    group: root
+    mode: '0440'
+  notify: Validate sudoers configuration
+
+- name: Deploy SSH authorized keys when provided
+  ansible.builtin.authorized_key:
+    user: "{{ item.name }}"
+    key: "{{ item.key }}"
+    manage_dir: true
+  loop: "{{ hardening_authorized_users }}"
+  when: hardening_authorized_users | length > 0
+
+- name: Enforce secure umask defaults
+  ansible.builtin.lineinfile:
+    path: "{{ item }}"
+    line: 'umask 027'
+    insertafter: EOF
+    state: present
+  loop: "{{ hardening_umask_targets }}"
+  ignore_errors: true
+
+- name: Ensure weekly AIDE integrity check cron job exists
+  ansible.builtin.cron:
+    name: Weekly AIDE check
+    minute: "{{ hardening_weekly_aide_check_minute }}"
+    hour: "{{ hardening_weekly_aide_check_hour }}"
+    weekday: "{{ hardening_weekly_aide_check_day }}"
+    user: root
+    job: /usr/bin/aide --check
+    state: present
+
+- name: Disable unnecessary services
+  ansible.builtin.service:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+  loop: "{{ (hardening_disable_services + hardening_additional_disable_services) | unique }}"
+  ignore_errors: true
+
+```
+
+# ./roles/system_hardening/tasks/debian.yml
+
+```
+---
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Upgrade packages to latest available
+  ansible.builtin.apt:
+    upgrade: dist
+    autoremove: true
+
+- name: Ensure unattended upgrades configuration is present
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |-
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Ensure ufw is installed
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+
+- name: Configure ufw default policies
+  ansible.builtin.command: "{{ item }}"
+  args:
+    warn: false
+  loop:
+    - ufw default deny incoming
+    - ufw default allow outgoing
+  changed_when: false
+
+- name: Allow SSH and Cockpit in ufw
+  ansible.builtin.command: "ufw allow {{ item }}"
+  args:
+    warn: false
+  loop:
+    - "{{ hardening_ssh_port }}/tcp"
+    - 9090/tcp
+  changed_when: false
+
+- name: Enable ufw firewall
+  ansible.builtin.command: ufw --force enable
+  args:
+    warn: false
+  changed_when: false
+
+- name: Deploy fail2ban SSH jail configuration
+  ansible.builtin.template:
+    src: fail2ban_ssh.conf.j2
+    dest: /etc/fail2ban/jail.d/ssh.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Enable security related services
+  ansible.builtin.service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop:
+    - unattended-upgrades
+    - fail2ban
+    - auditd
+    - acct
+    - clamav-freshclam
+    - clamav-daemon
+
+- name: Update rkhunter databases
+  ansible.builtin.command: "{{ item }}"
+  changed_when: false
+  failed_when: false
+  loop:
+    - rkhunter --propupd
+    - rkhunter --update
+  when: ansible_facts.packages.get('rkhunter') is defined
+
+- name: Initialize AIDE database on Debian-based hosts
+  ansible.builtin.command: aideinit
+  register: aide_init_result
+  changed_when: aide_init_result.rc == 0
+  when:
+    - ansible_facts.packages.get('aide') is defined
+    - not hardening_aide_db.stat.exists
+
+- name: Record AIDE database initialization on Debian hosts
+  ansible.builtin.set_fact:
+    hardening_aide_db:
+      stat:
+        exists: true
+  when:
+    - ansible_facts.packages.get('aide') is defined
+    - aide_init_result is defined
+    - aide_init_result.rc == 0
+
+
+```
+
+# ./roles/system_hardening/tasks/main.yml
+
+```
+---
+- name: Gather package facts
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Include common hardening tasks
+  ansible.builtin.import_tasks: common.yml
+
+- name: Include Debian family hardening
+  ansible.builtin.include_tasks: debian.yml
+  when: ansible_os_family == 'Debian'
+
+- name: Include Red Hat family hardening
+  ansible.builtin.include_tasks: redhat.yml
+  when: ansible_os_family == 'RedHat'
+
+```
+
+# ./roles/system_hardening/tasks/redhat.yml
+
+```
+---
+- name: Ensure latest packages are installed
+  ansible.builtin.dnf:
+    name: "*"
+    state: latest
+    update_cache: true
+
+- name: Query current firewalld default zone
+  ansible.builtin.command: firewall-cmd --get-default-zone
+  register: firewalld_current_zone
+  changed_when: false
+  failed_when: firewalld_current_zone.rc not in [0, 252]
+  when: ansible_facts.packages.get('firewalld') is defined
+
+- name: Configure firewalld default zone
+  ansible.builtin.command: "firewall-cmd --set-default-zone={{ hardening_firewalld_zone }}"
+  when:
+    - ansible_facts.packages.get('firewalld') is defined
+    - firewalld_current_zone.stdout is defined
+    - firewalld_current_zone.stdout.strip() != hardening_firewalld_zone
+
+- name: Ensure firewalld zone target is drop
+  ansible.posix.firewalld:
+    zone: "{{ hardening_firewalld_zone }}"
+    target: DROP
+    permanent: true
+    immediate: true
+  when: ansible_facts.packages.get('firewalld') is defined
+
+- name: Allow cockpit service via firewalld
+  ansible.posix.firewalld:
+    zone: "{{ hardening_firewalld_zone }}"
+    service: "{{ item }}"
+    permanent: true
+    state: enabled
+    immediate: true
+  loop: "{{ hardening_firewalld_services }}"
+  when: ansible_facts.packages.get('firewalld') is defined
+
+- name: Allow SSH port via firewalld
+  ansible.posix.firewalld:
+    zone: "{{ hardening_firewalld_zone }}"
+    port: "{{ item }}"
+    permanent: true
+    state: enabled
+    immediate: true
+  loop: "{{ hardening_firewalld_ports_map.get('default') }}"
+  when: ansible_facts.packages.get('firewalld') is defined
+
+- name: Reload firewalld configuration
+  ansible.posix.firewalld:
+    state: reloaded
+  when: ansible_facts.packages.get('firewalld') is defined
+
+- name: Ensure SELinux configuration file enforces mode
+  ansible.builtin.replace:
+    path: /etc/selinux/config
+    regexp: '^SELINUX=.*'
+    replace: 'SELINUX=enforcing'
+  notify: Restart SSH service
+  when: ansible_facts.packages.get('selinux-policy-targeted') is defined
+
+- name: Set SELinux enforcing at runtime
+  ansible.builtin.command: setenforce 1
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_selinux is defined
+    - ansible_selinux.status == 'enabled'
+    - ansible_selinux.mode != 'enforcing'
+
+- name: Allow SSH custom port in SELinux
+  ansible.posix.seport:
+    ports: "{{ hardening_ssh_port }}"
+    proto: tcp
+    setype: ssh_port_t
+    state: present
+  when:
+    - hardening_ssh_port | int != 22
+    - ansible_selinux is defined
+    - ansible_selinux.status == 'enabled'
+
+- name: Deploy fail2ban SSH jail configuration
+  ansible.builtin.template:
+    src: fail2ban_ssh.conf.j2
+    dest: /etc/fail2ban/jail.d/ssh.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Configure dnf-automatic for security updates
+  ansible.builtin.ini_file:
+    path: /etc/dnf/automatic.conf
+    section: commands
+    option: apply_updates
+    value: 'yes'
+  when: ansible_facts.packages.get('dnf-automatic') is defined
+
+- name: Configure dnf-automatic security only
+  ansible.builtin.ini_file:
+    path: /etc/dnf/automatic.conf
+    section: commands
+    option: upgrade_type
+    value: security
+  when: ansible_facts.packages.get('dnf-automatic') is defined
+
+- name: Ensure dnf-automatic timer enabled
+  ansible.builtin.systemd:
+    name: dnf-automatic.timer
+    state: started
+    enabled: true
+  when: ansible_facts.packages.get('dnf-automatic') is defined
+
+- name: Prepare ClamAV directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: clamav
+    group: clamav
+    mode: '0755'
+  loop:
+    - /var/lib/clamav
+    - /run/clamd.scan
+    - /var/log/clamd.scan
+  ignore_errors: true
+  when: ansible_facts.packages.get('clamav') is defined
+
+- name: Update ClamAV signatures
+  ansible.builtin.command: timeout 300 freshclam
+  changed_when: false
+  failed_when: false
+  when: ansible_facts.packages.get('clamav') is defined
+
+- name: Ensure security services are enabled
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop:
+    - fail2ban
+    - auditd
+    - clamd@scan
+  ignore_errors: true
+
+- name: Run initial chkrootkit scan
+  ansible.builtin.command: chkrootkit
+  args:
+    creates: /var/log/chkrootkit-initial.log
+  register: chkrootkit_run
+  failed_when: false
+  changed_when: chkrootkit_run.rc == 0
+  when: ansible_facts.packages.get('chkrootkit') is defined
+
+- name: Capture chkrootkit initial log
+  ansible.builtin.copy:
+    dest: /var/log/chkrootkit-initial.log
+    content: "{{ chkrootkit_run.stdout }}\n{{ chkrootkit_run.stderr }}"
+  when: chkrootkit_run is defined and chkrootkit_run.stdout is defined
+
+- name: Schedule weekly chkrootkit scan
+  ansible.builtin.cron:
+    name: Weekly chkrootkit scan
+    minute: 0
+    hour: 2
+    weekday: 0
+    job: "/usr/sbin/chkrootkit > /var/log/chkrootkit-weekly.log 2>&1"
+    user: root
+  when: ansible_facts.packages.get('chkrootkit') is defined
+
+- name: Initialize AIDE database on Red Hat hosts
+  ansible.builtin.command: aide --init
+  args:
+    creates: "{{ hardening_aide_new_db_path }}"
+  register: aide_init_redhat
+  changed_when: aide_init_redhat.rc == 0
+  when:
+    - ansible_facts.packages.get('aide') is defined
+    - not hardening_aide_db.stat.exists
+
+- name: Promote initialized AIDE database
+  ansible.builtin.command: "mv {{ hardening_aide_new_db_path }} {{ hardening_aide_db_path }}"
+  when:
+    - ansible_facts.packages.get('aide') is defined
+    - aide_init_redhat is defined
+    - aide_init_redhat.rc == 0
+    - aide_init_redhat is changed
+
+- name: Record AIDE database initialization on Red Hat hosts
+  ansible.builtin.set_fact:
+    hardening_aide_db:
+      stat:
+        exists: true
+  when:
+    - ansible_facts.packages.get('aide') is defined
+    - aide_init_redhat is defined
+    - aide_init_redhat.rc == 0
+
+```
+
+# ./roles/system_hardening/templates/fail2ban_ssh.conf.j2
+
+```
+[sshd]
+enabled = true
+port = {{ hardening_ssh_port }}
+filter = sshd
+logpath = {{ hardening_fail2ban_log_path_map.get(ansible_distribution, hardening_fail2ban_log_path_map.get(ansible_os_family, '/var/log/auth.log')) }}
+backend = {{ 'systemd' if ansible_os_family == 'RedHat' else 'auto' }}
+maxretry = {{ hardening_fail2ban_maxretry }}
+bantime = {{ hardening_fail2ban_bantime }}
+findtime = {{ hardening_fail2ban_findtime }}
+
+```
+
+# ./roles/system_hardening/templates/ssh_hardening.conf.j2
+
+```
+Port {{ hardening_ssh_port }}
+PermitRootLogin no
+PasswordAuthentication no
+PubkeyAuthentication yes
+MaxAuthTries 3
+ClientAliveInterval 300
+ClientAliveCountMax 2
+X11Forwarding no
+AllowTcpForwarding no
+IgnoreRhosts yes
+HostbasedAuthentication no
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+KbdInteractiveAuthentication no
+KerberosAuthentication no
+GSSAPIAuthentication no
+UsePAM yes
+PrintMotd no
+TCPKeepAlive yes
+Compression delayed
+MaxStartups 2
+LoginGraceTime 30
+
+```
+
+# ./roles/system_hardening/vars/main.yml
+
+```
+---
+hardening_packages_common:
+  Debian:
+    - python3
+    - openssh-server
+    - cockpit
+    - cockpit-networkmanager
+    - cockpit-packagekit
+    - cockpit-storaged
+    - cockpit-sosreport
+    - unattended-upgrades
+    - fail2ban
+    - auditd
+    - acct
+    - clamav
+    - clamav-daemon
+    - rkhunter
+    - aide
+    - ufw
+  Ubuntu:
+    - python3
+    - openssh-server
+    - cockpit
+    - cockpit-networkmanager
+    - cockpit-packagekit
+    - cockpit-storaged
+    - cockpit-pcp
+    - cockpit-sosreport
+    - cockpit-tuned
+    - unattended-upgrades
+    - fail2ban
+    - auditd
+    - acct
+    - clamav
+    - clamav-daemon
+    - rkhunter
+    - aide
+    - ufw
+  AlmaLinux:
+    - python3
+    - openssh-server
+    - cockpit
+    - cockpit-networkmanager
+    - cockpit-packagekit
+    - cockpit-storaged
+    - cockpit-sosreport
+    - selinux-policy-targeted
+    - policycoreutils-python-utils
+    - dnf-automatic
+    - epel-release
+    - fail2ban
+    - python3-fail2ban
+    - audit
+    - clamav
+    - clamav-update
+    - clamd
+    - chkrootkit
+    - aide
+    - firewalld
+hardening_firewalld_ports_map:
+  default:
+    - "{{ hardening_ssh_port }}/tcp"
+hardening_fail2ban_log_path_map:
+  Debian: /var/log/auth.log
+  Ubuntu: /var/log/auth.log
+  AlmaLinux: /var/log/secure
+
+```
+
+# ./schemas/service.schema.yml
+
+```
+---
+type: object
+required:
+  - service_id
+  - service_name
+  - service_image
+  - exports
+  - storage
+  - health
+  - runtime_templates
+properties:
+  service_id:
+    type: string
+  service_name:
+    type: string
+  service_unit_name:
+    type: string
+  service_image:
+    type: string
+  service_ip:
+    type: string
+  service_port:
+    type: object
+    properties:
+      target:
+        type: integer
+      published:
+        type: integer
+      host_ip:
+        type: string
+      protocol:
+        type: string
+    required:
+      - target
+  service_ports:
+    type: array
+    items:
+      type: object
+      properties:
+        target:
+          type: integer
+        published:
+          type: integer
+        host_ip:
+          type: string
+        protocol:
+          type: string
+      required:
+        - target
+  service_env:
+    type: array
+    items:
+      type: object
+      required: [name, value]
+      properties:
+        name:
+          type: string
+        value:
+          type: string
+  service_volumes:
+    type: array
+    items:
+      type: object
+      required: [name, target]
+      properties:
+        name:
+          type: string
+        source:
+          type: string
+        target:
+          type: string
+        mode:
+          type: string
+        driver:
+          type: string
+        size:
+          type: string
+  service_networks:
+    type: array
+    items:
+      type: string
+  service_unit:
+    type: object
+    properties:
+      description:
+        type: string
+      after:
+        type: array
+        items:
+          type: string
+      service:
+        type: object
+      install_wanted_by:
+        type: array
+        items:
+          type: string
+  service_packages:
+    type: array
+    items:
+      type: string
+  service_files:
+    type: array
+    items:
+      type: object
+      required: [path, content]
+      properties:
+        path:
+          type: string
+        content:
+          type: string
+        mode:
+          type: string
+  service_services:
+    type: array
+    items:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        enabled:
+          type: boolean
+        state:
+          type: string
+  service_commands:
+    type: array
+    items:
+      type: string
+  service_resources:
+    type: object
+    properties:
+      memory_mb:
+        type: integer
+      cpu_cores:
+        type: number
+  service_namespace:
+    type: string
+  service_replicas:
+    type: integer
+  service_storage_gb:
+    type: integer
+  service_storage_size:
+    type: string
+  service_gateway:
+    type: string
+  service_container:
+    type: object
+    properties:
+      vmid:
+        type: integer
+      hostname:
+        type: string
+      ostemplate:
+        type: string
+      disk:
+        type: integer
+      cores:
+        type: integer
+      memory:
+        type: integer
+      swap:
+        type: integer
+      interface:
+        type: string
+      bridge:
+        type: string
+      cidr:
+        type: integer
+      gateway:
+        type: string
+      onboot:
+        type: string
+      unprivileged:
+        type: string
+      features:
+        type: string
+  service_volume:
+    type: object
+  version:
+    type: string
+  requires:
+    type: array
+    items:
+      type: string
+  exports:
+    type: object
+    properties:
+      env:
+        type: array
+        items:
+          type: object
+          required: [name, value]
+          properties:
+            name:
+              type: string
+            value:
+              type: string
+            description:
+              type: string
+  storage:
+    type: array
+    items:
+      type: object
+      required: [name, path]
+  health:
+    type: object
+    required: [cmd]
+    properties:
+      cmd:
+        type: array
+      interval:
+        type: string
+      timeout:
+        type: string
+      retries:
+        type: integer
+  secrets:
+    type: object
+    properties:
+      shred_after_apply:
+        type: boolean
+      env:
+        type: array
+        items:
+          type: object
+          required: [name, value]
+          properties:
+            name:
+              type: string
+            value:
+              type: string
+      files:
+        type: array
+        items:
+          type: object
+          required: [name, value]
+          properties:
+            name:
+              type: string
+            value:
+              type: string
+            content:
+              type: string
+            target:
+              type: string
+            mode:
+              type: string
+  runtime_templates:
+    type: object
+
+```
+
+# ./templates/baremetal.yml.j2
+
+```
+{% set unit = service_unit | default({}) %}
+{% set description = unit.description | default('Managed service for ' ~ (service_name | default(service_id))) %}
+{% set after = unit.after | default(['network.target']) %}
+{% set service_section = unit.service | default({'Type': 'simple', 'ExecStart': '/usr/bin/true'}) %}
+{% set install_targets = unit.install_wanted_by | default(['multi-user.target']) %}
+[Unit]
+Description={{ description }}
+{% for dependency in after %}
+After={{ dependency }}
+{% endfor %}
+
+[Service]
+{% for key, value in service_section.items() %}
+{{ key }}={{ value }}
+{% endfor %}
+
+[Install]
+{% for target in install_targets %}
+WantedBy={{ target }}
+{% endfor %}
+
+```
+
+# ./templates/docker.yml.j2
+
+```
+{% set services_list = services | default([{
+  'name': service_name | default(service_id),
+  'container_name': service_name | default(service_id),
+  'image': service_image,
+  'env': service_env | default([]),
+  'ports': service_ports | default((service_port is defined) | ternary([service_port], [])),
+  'volumes': service_volumes | default([]),
+  'networks': service_networks | default(['app-network'])
+}]) %}
+{% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] %}
+{% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
+{% set env_file_name = (service_name | default(service_id)) + '.env' %}
+version: '3.8'
+
+services:
+{% for svc in services_list %}
+  {{ svc.name }}:
+    image: {{ svc.image }}
+    container_name: {{ svc.container_name | default(svc.name) }}
+    restart: unless-stopped
+{% set svc_env_file = svc.env_file | default(env_file_name) %}
+{% set svc_secret_env = svc.secret_env | default(secret_env) %}
+{% if svc_secret_env %}
+    env_file:
+      - "./{{ svc_env_file }}"
+{% endif %}
+{% set inline_env = svc.env | default([]) %}
+{% if inline_env %}
+    environment:
+{% for item in inline_env %}
+      {{ item.name }}: {{ item.value }}
+{% endfor %}
+{% endif %}
+{% set volumes = svc.volumes | default([]) %}
+{% if volumes %}
+    volumes:
+{% for vol in volumes %}
+      - {{ vol.source | default(vol.name) }}:{{ vol.target }}{% if vol.mode is defined %}:{{ vol.mode }}{% endif %}
+{% endfor %}
+{% endif %}
+{% set ports = svc.ports | default([]) %}
+{% if ports %}
+    ports:
+{% for port in ports %}
+      - "{{ port.host_ip | default('') }}{% if port.host_ip is defined and port.host_ip | string | length > 0 %}:{% endif %}{{ port.published | default(port.target) }}:{{ port.target }}{% if port.protocol is defined %}/{{ port.protocol }}{% endif %}"
+{% endfor %}
+{% endif %}
+{% set networks = svc.networks | default(['app-network']) %}
+{% if networks %}
+    networks:
+{% for net in networks %}
+      - {{ net }}
+{% endfor %}
+{% endif %}
+{% if health is defined %}
+    healthcheck:
+      test: {{ health.cmd | default(['true']) | to_json }}
+      interval: {{ health.interval | default('10s') }}
+      timeout: {{ health.timeout | default('5s') }}
+      retries: {{ health.retries | default(3) }}
+{% endif %}
+{% if file_secrets %}
+    secrets:
+{% for secret in file_secrets %}
+      - source: {{ secret.name }}
+        target: {{ secret.target | default(secret.name) }}
+        mode: {{ secret.mode | default('0400') }}
+{% endfor %}
+{% endif %}
+{% endfor %}
+
+{% set ns = namespace(volumes=[]) %}
+{% for svc in services_list %}
+  {% for vol in svc.volumes | default([]) %}
+    {% set volume_name = vol.source | default(vol.name) %}
+    {% if volume_name not in ns.volumes %}
+      {% set _ = ns.volumes.append(volume_name) %}
+    {% endif %}
+  {% endfor %}
+{% endfor %}
+{% if ns.volumes %}
+volumes:
+{% for volume_name in ns.volumes %}
+  {{ volume_name }}:
+    driver: local
+{% endfor %}
+{% endif %}
+
+{% if file_secrets %}
+secrets:
+{% for secret in file_secrets %}
+  {{ secret.name }}:
+    file: "./secrets/{{ secret.name }}"
+{% endfor %}
+{% endif %}
+
+{% set network_ns = namespace(items=[]) %}
+{% for svc in services_list %}
+  {% for net in svc.networks | default(['app-network']) %}
+    {% if net not in network_ns.items %}
+      {% set _ = network_ns.items.append(net) %}
+    {% endif %}
+  {% endfor %}
+{% endfor %}
+{% if network_ns.items %}
+networks:
+{% for net in network_ns.items %}
+  {{ net }}:
+    driver: bridge
+{% endfor %}
+{% endif %}
+
+```
+
+# ./templates/kubernetes.yml.j2
+
+```
+{% set svc_name = service_name | default(service_id) %}
+{% set namespace = service_namespace | default('default') %}
+{% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] %}
+{% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
+{% set secret_name = svc_name + '-secrets' %}
+{% set health_cmd = health.cmd | default(['true']) %}
+{% set health_interval_seconds = (health.interval | default('10s')) | regex_replace('s$', '') | int %}
+{% set health_timeout_seconds = (health.timeout | default('5s')) | regex_replace('s$', '') | int %}
+{% set health_retries = health.retries | default(3) %}
+{% set replicas = service_replicas | default(1) %}
+{% set ports = service_ports | default((service_port is defined) | ternary([service_port], [])) %}
+{% set container_port = ports[0].target if ports | length > 0 else 8080 %}
+{% set service_port = ports[0].published if ports | length > 0 and ports[0].published is defined else container_port %}
+{% set resources = service_resources | default({'memory_mb': 256, 'cpu_cores': 1}) %}
+{% set memory_request = resources.memory_mb | default(256) %}
+{% set cpu_cores = resources.cpu_cores | default(1) %}
+{% set volume_config = service_volume | default(service_volumes[0] if service_volumes is defined and service_volumes | length > 0 else None) %}
+{% if service_storage_size is defined %}
+{% set storage_size = service_storage_size %}
+{% elif volume_config is mapping and volume_config.size is defined %}
+{% set storage_size = volume_config.size %}
+{% elif service_storage_gb is defined %}
+{% set storage_size = service_storage_gb ~ 'Gi' %}
+{% else %}
+{% set storage_size = '1Gi' %}
+{% endif %}
+{% set volume_mount_path = volume_config.target if volume_config is mapping and volume_config.target is defined else '/data' %}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ secret_name }}
+  namespace: {{ namespace }}
+type: Opaque
+stringData:
+{% for item in secret_env %}
+  {{ item.name }}: {{ item.value | to_json }}
+{% endfor %}
+{% for secret in file_secrets %}
+  {{ secret.name }}: {{ (secret.value | default(secret.content) | default('', true)) | to_json }}
+{% endfor %}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ svc_name }}-data
+  namespace: {{ namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ storage_size }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ svc_name }}
+  namespace: {{ namespace }}
+spec:
+  replicas: {{ replicas }}
+  selector:
+    matchLabels:
+      app: {{ svc_name }}
+  template:
+    metadata:
+      labels:
+        app: {{ svc_name }}
+    spec:
+      containers:
+        - name: {{ svc_name }}
+          image: {{ service_image }}
+          env:
+{% for item in secret_env %}
+            - name: {{ item.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ secret_name }}
+                  key: {{ item.name }}
+{% endfor %}
+{% for item in service_env | default([]) %}
+            - name: {{ item.name }}
+              value: {{ item.value }}
+{% endfor %}
+          ports:
+            - containerPort: {{ container_port }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ volume_mount_path }}
+{% if file_secrets %}
+{% for secret in file_secrets %}
+            - name: secret-files
+              mountPath: {{ secret.target | default('/run/secrets/' ~ secret.name) }}
+              subPath: {{ secret.name }}
+              readOnly: true
+{% endfor %}
+{% endif %}
+          livenessProbe:
+            exec:
+              command:
+{% for arg in health_cmd %}
+                - {{ arg }}
+{% endfor %}
+            initialDelaySeconds: 30
+            periodSeconds: {{ health_interval_seconds }}
+            timeoutSeconds: {{ health_timeout_seconds }}
+            failureThreshold: {{ health_retries }}
+          readinessProbe:
+            exec:
+              command:
+{% for arg in health_cmd %}
+                - {{ arg }}
+{% endfor %}
+            initialDelaySeconds: 10
+            periodSeconds: {{ health_interval_seconds }}
+            timeoutSeconds: {{ health_timeout_seconds }}
+            failureThreshold: {{ health_retries }}
+            successThreshold: 1
+          resources:
+            requests:
+              memory: {{ memory_request }}Mi
+              cpu: {{ (cpu_cores * 1000) | int }}m
+            limits:
+              memory: {{ memory_request }}Mi
+              cpu: {{ (cpu_cores * 1000) | int }}m
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ svc_name }}-data
+{% if file_secrets %}
+        - name: secret-files
+          secret:
+            secretName: {{ secret_name }}
+            items:
+{% for secret in file_secrets %}
+              - key: {{ secret.name }}
+                path: {{ secret.name }}
+{% endfor %}
+{% endif %}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ svc_name }}
+  namespace: {{ namespace }}
+spec:
+  selector:
+    app: {{ svc_name }}
+  ports:
+    - port: {{ service_port }}
+      targetPort: {{ container_port }}
+  type: ClusterIP
+
+```
+
+# ./templates/podman.yml.j2
+
+```
+{% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] %}
+{% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
+{% set quadlet_scope_value = quadlet_scope | default('system') %}
+{% if quadlet_scope_value == 'user' %}
+{% set quadlet_base_dir = '%h/.config/containers/systemd' %}
+{% else %}
+{% set quadlet_base_dir = '/etc/containers/systemd' %}
+{% endif %}
+{% set env_file_path = quadlet_base_dir ~ '/' ~ (service_name | default(service_id)) ~ '.env' %}
+{% set secret_dir = quadlet_base_dir ~ '/secrets' %}
+{% set ports = service_ports | default((service_port is defined) | ternary([service_port], [])) %}
+{% set volumes = service_volumes | default([]) %}
+{% set inline_env = service_env | default([]) %}
+[Unit]
+Description={{ service_unit_description | default('Managed container for ' ~ (service_name | default(service_id))) }}
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image={{ service_image }}
+ContainerName={{ service_name | default(service_id) }}
+AutoUpdate=registry
+{% for env in inline_env %}
+Environment={{ env.name }}={{ env.value }}
+{% endfor %}
+{% if secret_env %}
+EnvironmentFile={{ env_file_path }}
+{% endif %}
+{% for vol in volumes %}
+Volume={{ vol.source | default(vol.name) }}.volume:{{ vol.target }}:{% if vol.mode is defined %}{{ vol.mode }}{% else %}Z{% endif %}
+{% endfor %}
+{% for secret in file_secrets %}
+Volume={{ secret_dir }}/{{ secret.name }}:{{ secret.target | default('/run/secrets/' ~ secret.name) }}:ro,Z
+{% endfor %}
+{% for port in ports %}
+PublishPort={{ port.host_ip | default('') }}{% if port.host_ip is defined and port.host_ip | string | length > 0 %}:{% endif %}{{ port.published | default(port.target) }}:{{ port.target }}{% if port.protocol is defined %}/{{ port.protocol }}{% endif %}
+{% endfor %}
+HealthCmd={{ (health.cmd | default(['true'])) | join(' ') }}
+HealthInterval={{ health.interval | default('10s') }}
+HealthTimeout={{ health.timeout | default('5s') }}
+HealthRetries={{ health.retries | default(3) }}
+
+[Service]
+Restart=always
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target default.target
+
+```
+
+# ./templates/proxmox.yml.j2
+
+```
+---
+{% set container = service_container | default({}) %}
+{% set pkg_list = service_packages | default([]) %}
+{% set file_list = service_files | default([]) %}
+{% set svc_list = service_services | default([]) %}
+{% set cmd_list = service_commands | default([]) %}
+container_ip: "{{ service_ip }}"
+container:
+  vmid: "{{ container.vmid | default(service_id) }}"
+  hostname: "{{ container.hostname | default(service_name | default(service_id)) }}"
+  ostemplate: "{{ container.ostemplate | default(proxmox_template | default('local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst')) }}"
+  disk: "{{ container.disk | default(service_storage_gb | default(10)) }}"
+  cores: "{{ container.cores | default(service_resources.cpu_cores | default(1)) }}"
+  memory: "{{ container.memory | default(service_resources.memory_mb | default(512)) }}"
+  swap: "{{ container.swap | default(service_resources.memory_mb | default(512)) }}"
+  netif:
+    net0: "name={{ container.interface | default('eth0') }},bridge={{ container.bridge | default('vmbr0') }},ip={{ service_ip }}/{{ container.cidr | default(24) }}{% if container.gateway is defined %},gw={{ container.gateway }}{% elif service_gateway is defined %},gw={{ service_gateway }}{% endif %}"
+  onboot: {{ container.onboot | default('yes') }}
+  unprivileged: {{ container.unprivileged | default('yes') }}
+  features: "{{ container.features | default('nesting=1,keyctl=1') }}"
+
+setup:
+  packages:{% if pkg_list | length == 0 %} []{% else %}
+{% for pkg in pkg_list %}
+    - {{ pkg }}
+{% endfor %}{% endif %}
+  config:{% if file_list | length == 0 %} []{% else %}
+{% for item in file_list %}
+    - path: {{ item.path }}
+      content: |
+{{ item.content | indent(8, true) }}{% if item.mode is defined %}
+      mode: {{ item.mode }}{% endif %}
+{% endfor %}{% endif %}
+  services:{% if svc_list | length == 0 %} []{% else %}
+{% for svc in svc_list %}
+    - name: {{ svc.name }}
+      enabled: {{ svc.enabled | default(true) | ternary(true, false) }}
+      state: {{ svc.state | default('started') }}
+{% endfor %}{% endif %}
+  commands:{% if cmd_list | length == 0 %} []{% else %}
+{% for cmd in cmd_list %}
+    - {{ cmd }}
+{% endfor %}{% endif %}
+
+```
+
+# ./tests/render.yml
+
+```
+---
+- name: Render sample service runtime
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - sample_service.yml
+  tasks:
+    - name: Render runtime configuration
+      include_role:
+        name: roles/common/render_runtime
+
+```
+
+# ./tests/sample_service.yml
+
+```
+service_id: sample-service
+service_name: sample-service
+service_unit_name: sample-service
+service_image: docker.io/library/nginx:1.27
+version: "1.27"
+service_ip: 192.0.2.50
+service_ports:
+  - target: 8080
+    published: 8080
+    host_ip: 192.0.2.50
+service_env:
+  - name: APP_MODE
+    value: production
+  - name: APP_FEATURE_FLAG
+    value: "true"
+service_volumes:
+  - name: config
+    source: sample-service-config
+    target: /etc/sample-service
+    driver: local
+service_packages:
+  - nginx
+service_files:
+  - path: /etc/sample-service/runtime.env
+    mode: '0640'
+    content: |
+      APP_MODE=production
+      APP_FEATURE_FLAG=true
+service_services:
+  - name: sample-service
+    enabled: true
+    state: started
+service_commands:
+  - /usr/bin/true
+service_resources:
+  memory_mb: 512
+  cpu_cores: 1
+service_namespace: sample
+service_replicas: 1
+service_storage_gb: 5
+service_gateway: 192.0.2.1
+service_container:
+  vmid: 200
+  hostname: sample-service
+  ostemplate: local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst
+  disk: 5
+  cores: 1
+  memory: 512
+  swap: 512
+  bridge: vmbr0
+  cidr: 24
+  gateway: 192.0.2.1
+  interface: eth0
+  onboot: yes
+  unprivileged: yes
+  features: nesting=1,keyctl=1
+exports:
+  env:
+    - name: SAMPLE_SERVICE_URL
+      value: https://sample-service.internal
+      description: Base URL for dependent services
+    - name: SAMPLE_SERVICE_PORT
+      value: "8080"
+storage:
+  - name: config
+    path: /etc/sample-service
+health:
+  cmd:
+    - /bin/sh
+    - -c
+    - "exit 0"
+  interval: 10s
+  timeout: 5s
+  retries: 3
+runtime_templates:
+  proxmox: templates/proxmox.yml.j2
+  docker: templates/docker.yml.j2
+  podman: templates/podman.yml.j2
+  kubernetes: templates/kubernetes.yml.j2
+  baremetal: templates/baremetal.yml.j2
+secrets:
+  shred_after_apply: false
+  env:
+    - name: SAMPLE_SERVICE_TOKEN
+      value: super-secret-token
+  files:
+    - name: tls-cert
+      value: "-----BEGIN CERTIFICATE-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtestcertificate\n-----END CERTIFICATE-----"
+      target: /etc/sample-service/certs/tls.crt
+      mode: '0400'
+
+```
+
