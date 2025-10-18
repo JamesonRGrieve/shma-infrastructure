@@ -17,10 +17,12 @@ properties:
     type: string
   service_image:
     type: string
+    pattern: "^.+@sha256:[0-9a-f]{64}$"
   service_ip:
     type: string
   service_port:
     type: object
+    deprecated: true
     properties:
       target:
         type: integer
@@ -179,11 +181,9 @@ properties:
       unprivileged:
         type: string
       features:
-        oneOf:
-          - type: string
-          - type: array
-            items:
-              type: string
+        type: array
+        items:
+          type: string
   needs_container_runtime:
     type: boolean
 

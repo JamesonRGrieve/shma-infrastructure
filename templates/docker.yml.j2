@@ -26,7 +26,7 @@
   'container_name': service_name | default(service_id),
   'image': service_image,
   'env': service_env | default([]),
-  'ports': service_ports | default((service_port is defined) | ternary([service_port], [])),
+  'ports': service_ports | default([]),
   'volumes': service_volumes | default([]),
   'networks': service_networks | default(['app-network'])
 }]) %}

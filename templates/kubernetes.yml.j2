@@ -38,9 +38,9 @@
 {% set health_timeout_seconds = (health.timeout | default('5s')) | regex_replace('s$', '') | int %}
 {% set health_retries = health.retries | default(3) %}
 {% set replicas = service_replicas | default(1) %}
-{% set ports = service_ports | default((service_port is defined) | ternary([service_port], [])) %}
+{% set ports = service_ports | default([]) %}
 {% set container_port = ports[0].target if ports | length > 0 else 8080 %}
-{% set service_port = ports[0].published if ports | length > 0 and ports[0].published is defined else container_port %}
+{% set service_port_value = ports[0].published if ports | length > 0 and ports[0].published is defined else container_port %}
 {% set resources = service_resources | default({'memory_mb': 256, 'cpu_cores': 1}) %}
 {% set memory_request = resources.memory_mb | default(256) %}
 {% set cpu_cores = resources.cpu_cores | default(1) %}
@@ -226,7 +226,7 @@ spec:
   selector:
     app: {{ svc_name }}
   ports:
-    - port: {{ service_port }}
+    - port: {{ service_port_value }}
       targetPort: {{ container_port }}
   type: ClusterIP
 {% if ingress_enabled and ingress_routes %}
@@ -252,13 +252,13 @@ spec:
     - host: {{ route.host }}
       http:
         paths:
-          - path: {{ route.path_prefix | default('/') }}
+          - path: {{ route.path_prefix }}
             pathType: Prefix
             backend:
               service:
                 name: {{ svc_name }}
                 port:
-                  number: {{ service_port }}
+                  number: {{ service_port_value }}
 {% endfor %}
 {% if tls_map %}
   tls:
