@@ -1,0 +1,52 @@
+service_id: pvc-service
+service_name: pvc-service
+service_image: docker.io/library/postgres:16.4
+service_env:
+  - name: POSTGRES_DB
+    value: app
+  - name: POSTGRES_USER
+    value: app
+service_volumes:
+  - name: data
+    source: pvc-service-data
+    target: /var/lib/postgresql/data
+service_packages: []
+service_files: []
+service_services: []
+service_commands: []
+service_resources:
+  memory_mb: 1024
+  cpu_cores: 1
+service_namespace: pvc
+service_replicas: 1
+service_storage_gb: 20
+runtime_templates:
+  proxmox: templates/proxmox.yml.j2
+  docker: templates/docker.yml.j2
+  podman: templates/podman.yml.j2
+  kubernetes: templates/kubernetes.yml.j2
+  baremetal: templates/baremetal.yml.j2
+exports:
+  env:
+    - name: PVC_URL
+      value: postgres://pvc.local:5432/app
+storage:
+  - name: pgdata
+    path: /var/lib/pvc
+  - name: backups
+    path: /var/backups/pvc
+health:
+  cmd:
+    - /bin/sh
+    - -c
+    - "pg_isready"
+needs_container_runtime: true
+kubernetes:
+  pvc:
+    name: pvc-service-data
+    size: 20Gi
+    storageClassName: fast
+secrets:
+  shred_after_apply: false
+  env: []
+  files: []

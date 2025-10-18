@@ -52,6 +52,8 @@ container:
     net0: "name={{ container.interface | default('eth0') }},bridge={{ container.bridge | default('vmbr0') }},ip={{ service_ip }}/{{ container.cidr | default(24) }}{% if container.gateway is defined %},gw={{ container.gateway }}{% elif service_gateway is defined %},gw={{ service_gateway }}{% endif %}"
   onboot: {{ container.onboot | default('yes') }}
   unprivileged: {{ container.unprivileged | default('yes') }}
+
+
 {% if feature_ns.value %}
   features: "{{ feature_ns.value }}"
 {% endif %}
