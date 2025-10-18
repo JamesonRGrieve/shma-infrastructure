@@ -41,30 +41,14 @@
     state: present
     pull: always
 
-- name: Remove Compose secret environment file after apply
-  file:
-    path: "{{ compose_secret_env_path }}"
-    state: absent
-  when:
-    - compose_secret_shred | bool
-    - compose_secret_env | length > 0
-
-- name: Remove Compose secret files after apply
-  file:
-    path: "{{ runtime_output_dir }}/secrets/{{ item.name }}"
-    state: absent
-  loop: "{{ compose_secret_files }}"
-  when:
-    - compose_secret_shred | bool
-    - compose_secret_files | length > 0
-
-- name: Remove Compose secret directory after apply
-  file:
-    path: "{{ runtime_output_dir }}/secrets"
-    state: absent
-  when:
-    - compose_secret_shred | bool
-    - compose_secret_files | length > 0
+- name: Remove Compose secrets after apply
+  ansible.builtin.include_tasks: secret_cleanup.yml
+  vars:
+    cleanup_secret_env_path: "{{ compose_secret_env_path }}"
+    cleanup_secret_env: "{{ compose_secret_env }}"
+    cleanup_secret_files: "{{ compose_secret_files }}"
+    cleanup_secret_dir: "{{ runtime_output_dir }}/secrets"
+    cleanup_secret_shred: "{{ compose_secret_shred }}"
 
 - name: Set service IP for health checks
   set_fact:

@@ -78,34 +78,15 @@
     state: started
     scope: "{{ quadlet_effective_scope }}"
 
-- name: Remove Quadlet environment file after apply
-  file:
-    path: "{{ quadlet_env_path }}"
-    state: absent
-  when:
-    - quadlet_secret_shred | bool
-    - quadlet_secret_env | length > 0
-  become: {{ (quadlet_effective_scope == 'system') | bool }}
-
-- name: Remove Quadlet secret files after apply
-  file:
-    path: "{{ quadlet_secret_dir }}/{{ item.name }}"
-    state: absent
-  loop: "{{ quadlet_secret_files }}"
-  when:
-    - quadlet_secret_shred | bool
-    - quadlet_secret_files | length > 0
-  no_log: true
-  become: {{ (quadlet_effective_scope == 'system') | bool }}
-
-- name: Remove Quadlet secret directory after apply
-  file:
-    path: "{{ quadlet_secret_dir }}"
-    state: absent
-  when:
-    - quadlet_secret_shred | bool
-    - quadlet_secret_files | length > 0
-  become: {{ (quadlet_effective_scope == 'system') | bool }}
+- name: Remove Quadlet secrets after apply
+  ansible.builtin.include_tasks: secret_cleanup.yml
+  vars:
+    cleanup_secret_env_path: "{{ quadlet_env_path }}"
+    cleanup_secret_env: "{{ quadlet_secret_env }}"
+    cleanup_secret_files: "{{ quadlet_secret_files }}"
+    cleanup_secret_dir: "{{ quadlet_secret_dir }}"
+    cleanup_secret_shred: "{{ quadlet_secret_shred }}"
+    cleanup_become: {{ (quadlet_effective_scope == 'system') | bool }}
 
 - name: Set service IP for health checks
   set_fact:
