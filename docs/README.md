@@ -28,6 +28,15 @@ ansible-playbook tests/render.yml -e runtime=docker -e @tests/sample_service.yml
 
 The rendered manifest is written to `/tmp/ansible-runtime/<service_id>/<runtime>.yml` and can be validated with the same commands used in CI (for example `docker compose -f … config`).
 
+## Compatibility Matrix
+
+| Component | Tested versions | Notes |
+| --- | --- | --- |
+| Python | 3.11.x | Provisioned via `actions/setup-python` and verified during CI. |
+| Ansible | Ansible 9.5.1 (core 2.16.x) | Locked in `requirements.txt` and exercised across every adapter lane. |
+| Kubernetes CLI | kubectl v1.29.3 (stable lane), v1.31.1 (latest lane) | Both versions render and validate manifests in the matrix build. |
+| kind | v0.22.0 | Used for server-side Kubernetes validation. |
+
 ## Runtime Guides
 
 - [Proxmox LXC](proxmox.md)
@@ -36,6 +45,11 @@ The rendered manifest is written to `/tmp/ansible-runtime/<service_id>/<runtime>
 - [Kubernetes](kubernetes.md)
 - [Bare-Metal systemd](baremetal.md)
 - [Network Edge Automation](edge.md)
+
+## Operations Guides
+
+- [Backup strategy](backup.md)
+- [Troubleshooting](troubleshooting.md)
 
 ## Service Contract Essentials
 
@@ -82,6 +96,8 @@ secrets:
       target: /etc/sample-service/certs/tls.crt
       value: "{{ sample_service_tls_cert }}"
 ```
+
+> **Note:** Always declare host mounts with `service_volumes` (plural). The legacy `service_volume` key is deprecated and retained only for backward compatibility with older inventories.
 
 Downstream applications consume these exports by resolving them through a dependency registry shared between repositories. Provide the registry as a list of known dependencies either inline (`dependency_registry`) or via `dependency_registry_file`:
 

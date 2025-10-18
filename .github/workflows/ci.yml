@@ -95,6 +95,9 @@ jobs:
           chmod +x /tmp/kubectl
           sudo mv /tmp/kubectl /usr/local/bin/kubectl
 
+      - name: Verify compatibility matrix
+        run: python ci/verify_versions.py
+
       - name: Run gitleaks
         run: gitleaks detect --no-banner --redact --source .
 
