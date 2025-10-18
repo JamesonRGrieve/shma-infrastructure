@@ -1,8 +1,8 @@
 service_id: sample-service
 service_name: sample-service
 service_unit_name: sample-service
-service_image: docker.io/library/nginx:1.27
-version: "1.27"
+service_image: docker.io/library/nginx@sha256:2ed85f18cb2c6b49e191bcb6bf12c0c07d63f3937a05d9f5234170d4f8df5c94
+version: "1.27.0"
 service_ip: 192.0.2.50
 service_ports:
   - target: 8080
@@ -16,9 +16,9 @@ service_env:
 needs_container_runtime: true
 service_volumes:
   - name: config
-    source: sample-service-config
+    host_path: /srv/sample-service/config
+    host_path_type: DirectoryOrCreate
     target: /etc/sample-service
-    driver: local
 service_packages:
   - nginx
 service_files:
@@ -54,7 +54,6 @@ service_container:
   interface: eth0
   onboot: yes
   unprivileged: yes
-  features: nesting=1,keyctl=1
 exports:
   env:
     - name: SAMPLE_SERVICE_URL
@@ -80,7 +79,7 @@ runtime_templates:
   kubernetes: templates/kubernetes.yml.j2
   baremetal: templates/baremetal.yml.j2
 secrets:
-  shred_after_apply: false
+  shred_after_apply: true
   env:
     - name: SAMPLE_SERVICE_TOKEN
       value: super-secret-token
