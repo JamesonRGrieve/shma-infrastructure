@@ -78,10 +78,9 @@
   notify: Validate sudoers configuration
 
 - name: Require TTY for sudo invocations
-  ansible.builtin.copy:
+  ansible.builtin.template:
+    src: sudo_requiretty.j2
     dest: /etc/sudoers.d/requiretty
-    content: |-
-      Defaults requiretty
     owner: root
     group: root
     mode: '0440'
@@ -113,6 +112,52 @@
     user: root
     job: /usr/bin/aide --check
     state: present
+
+- name: Configure log rotation for security tooling
+  ansible.builtin.template:
+    src: security_tools_logrotate.j2
+    dest: /etc/logrotate.d/hardening-security-tools
+    owner: root
+    group: root
+    mode: '0644'
+  when: >-
+    ansible_facts.packages.get('clamav') is defined or
+    ansible_facts.packages.get('clamav-daemon') is defined or
+    ansible_facts.packages.get('clamav-update') is defined or
+    ansible_facts.packages.get('clamd') is defined or
+    ansible_facts.packages.get('rkhunter') is defined or
+    ansible_facts.packages.get('chkrootkit') is defined
+
+- name: Ensure chkrootkit log directory exists
+  ansible.builtin.file:
+    path: /var/log/chkrootkit
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+  when: ansible_facts.packages.get('chkrootkit') is defined
+
+- name: Schedule rkhunter scans during the maintenance window
+  ansible.builtin.cron:
+    name: RKHunter maintenance scan
+    minute: "{{ hardening_security_tool_scan_minute }}"
+    hour: "{{ hardening_security_tool_scan_hour }}"
+    weekday: "{{ hardening_security_tool_scan_weekday }}"
+    user: root
+    job: /usr/bin/rkhunter --cronjob --quiet --report-warnings-only
+    state: present
+  when: ansible_facts.packages.get('rkhunter') is defined
+
+- name: Schedule chkrootkit scans during the maintenance window
+  ansible.builtin.cron:
+    name: chkrootkit maintenance scan
+    minute: "{{ hardening_security_tool_scan_minute }}"
+    hour: "{{ hardening_security_tool_scan_hour }}"
+    weekday: "{{ hardening_security_tool_scan_weekday }}"
+    user: root
+    job: nice -n 10 /usr/sbin/chkrootkit >> /var/log/chkrootkit/chkrootkit.log 2>&1
+    state: present
+  when: ansible_facts.packages.get('chkrootkit') is defined
 
 - name: Disable unnecessary services
   ansible.builtin.service:

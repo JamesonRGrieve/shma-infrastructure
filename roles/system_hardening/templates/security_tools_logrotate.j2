@@ -1,0 +1,33 @@
+{% set frequency = hardening_security_tool_logrotate_frequency %}
+{% set rotate = hardening_security_tool_logrotate_rotate %}
+{% if ansible_facts.packages.get('clamav') is defined or ansible_facts.packages.get('clamav-daemon') is defined or ansible_facts.packages.get('clamav-update') is defined or ansible_facts.packages.get('clamd') is defined %}
+/var/log/clamav/*.log {
+    {{ frequency }}
+    rotate {{ rotate }}
+    missingok
+    notifempty
+    compress
+    delaycompress
+    sharedscripts
+}
+{% endif %}
+{% if ansible_facts.packages.get('rkhunter') is defined %}
+/var/log/rkhunter.log {
+    {{ frequency }}
+    rotate {{ rotate }}
+    missingok
+    notifempty
+    compress
+    delaycompress
+}
+{% endif %}
+{% if ansible_facts.packages.get('chkrootkit') is defined %}
+/var/log/chkrootkit/chkrootkit.log {
+    {{ frequency }}
+    rotate {{ rotate }}
+    missingok
+    notifempty
+    compress
+    delaycompress
+}
+{% endif %}
