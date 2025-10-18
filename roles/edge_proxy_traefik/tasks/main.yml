@@ -1,0 +1,21 @@
+---
+- name: Ensure Traefik dynamic configuration directory exists
+  file:
+    path: "{{ traefik_dynamic_config_dir }}"
+    state: directory
+    owner: "{{ traefik_config_owner }}"
+    group: "{{ traefik_config_group }}"
+    mode: "0750"
+
+- name: Render Traefik ingress configuration
+  template:
+    src: ingress.yml.j2
+    dest: "{{ traefik_config_file }}"
+    owner: "{{ traefik_config_owner }}"
+    group: "{{ traefik_config_group }}"
+    mode: "{{ traefik_config_mode }}"
+  notify: Reload Traefik
+
+- name: Flush handlers if we manage the Traefik service
+  meta: flush_handlers
+  when: traefik_manage_service

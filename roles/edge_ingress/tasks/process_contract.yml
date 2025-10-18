@@ -1,0 +1,33 @@
+---
+- name: Load ingress exports env for {{ edge_ingress_contract.service_id | default('unnamed service') }}
+  when: edge_ingress_contract.exports_env_path is defined
+  slurp:
+    src: "{{ edge_ingress_contract.exports_env_path }}"
+  register: edge_ingress_contract_exports_env
+
+- name: Determine ingress exports for {{ edge_ingress_contract.service_id | default('unnamed service') }}
+  set_fact:
+    edge_ingress_contract_exports: >-
+      {{
+        (edge_ingress_contract.exports | default({}))
+        if edge_ingress_contract.exports is defined
+        else (edge_ingress_contract_exports_env.content | b64decode | parse_ingress_exports(edge_ingress_required_keys | tuple))
+      }}
+
+- name: Merge ingress defaults for {{ edge_ingress_contract.service_id | default('unnamed service') }}
+  set_fact:
+    edge_ingress_backends: "{{ edge_ingress_backends + [ merged_backend ] }}"
+  vars:
+    merged_backend:
+      service_id: "{{ edge_ingress_contract.service_id | default(edge_ingress_contract_exports.APP_FQDN) }}"
+      router_name: "{{ edge_ingress_contract.router_name | default((edge_ingress_contract.service_id | default(edge_ingress_contract_exports.APP_FQDN)) + '-router') }}"
+      router_entrypoint: "{{ edge_ingress_contract.router_entrypoint | default(edge_ingress_defaults.router_entrypoint) }}"
+      tls: {{ edge_ingress_contract.tls | default(edge_ingress_defaults.tls) | bool }}
+      tls_certresolver: "{{ edge_ingress_contract.tls_certresolver | default(edge_ingress_defaults.tls_certresolver) }}"
+      scheme: "{{ edge_ingress_contract.scheme | default(edge_ingress_defaults.scheme) }}"
+      path_prefix: "{{ edge_ingress_contract.path_prefix | default(edge_ingress_defaults.path_prefix) }}"
+      middlewares: {{ edge_ingress_contract.middlewares | default([]) }}
+      pass_host_header: {{ edge_ingress_contract.pass_host_header | default(True) | bool }}
+      preserve_host: {{ edge_ingress_contract.preserve_host | default(False) | bool }}
+      exports: {{ edge_ingress_contract_exports }}
+      service_labels: {{ edge_ingress_contract.service_labels | default({}) }}

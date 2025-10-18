@@ -1,0 +1,10 @@
+---
+- name: Reset derived ingress backends
+  set_fact:
+    edge_ingress_backends: []
+
+- name: Process ingress contracts
+  include_tasks: process_contract.yml
+  loop: "{{ edge_ingress_contracts }}"
+  loop_control:
+    loop_var: edge_ingress_contract

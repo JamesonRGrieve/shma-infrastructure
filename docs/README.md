@@ -35,6 +35,7 @@ The rendered manifest is written to `/tmp/ansible-runtime/<service_id>/<runtime>
 - [Podman Quadlet](podman.md)
 - [Kubernetes](kubernetes.md)
 - [Bare-Metal systemd](baremetal.md)
+- [Network Edge Automation](edge.md)
 
 ## Service Contract Essentials
 
@@ -116,6 +117,7 @@ The registry keeps validation decoupled from the Ansible inventory while ensurin
 - `hardening_enable_cockpit` – opt-in toggle that installs Cockpit, binds it to `hardening_cockpit_listen_address` (defaults to `127.0.0.1`), and optionally opens UFW 9090 to the addresses listed in `hardening_cockpit_allowed_sources`.
 - `hardening_cockpit_passwordless_sudo` – defaults to `false`. Enable only if Cockpit must issue privileged commands without prompting.
 - `hardening_enable_ipv6` – defaults to `true`, keeping dual-stack networks intact. Disable only when upstream networking prohibits IPv6 entirely.
+- `edge_ingress_contracts` – list of ingress exports the edge roles consume. Pair with one or more `edge_proxy_*`, `edge_opnsense`, or `edge_pfsense` roles to automate reverse proxies and firewall HAProxy instances.
 
 ## Continuous Integration
 

@@ -27,7 +27,7 @@ ansible-galaxy collection install kubernetes.core
 - `Secret` – named `<service_id>-files`, storing the rendered secret files.
 - `PersistentVolumeClaim` – sized from `service_storage_gb` or `service_storage_size`. Skipped automatically when `service_volumes.host_path` is provided.
 - `emptyDir` – emitted for each `mounts.ephemeral_mounts` entry that applies to Kubernetes, defaulting to `medium: Memory`.
-- `Deployment` – references the Secret for env vars, mounts secret files, and configures probes/resources.
+- `Deployment` – references the Secret for env vars, mounts secret files, configures probes/resources, and enforces non-root security defaults.
 - `Service` – exposes declared `service_ports` within the cluster.
 
 Snippet:
@@ -42,6 +42,15 @@ spec:
     spec:
       containers:
         - name: sample-service
+          securityContext:
+            runAsUser: 65532
+            runAsGroup: 65532
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           env:
             - name: SAMPLE_SERVICE_TOKEN
               valueFrom:

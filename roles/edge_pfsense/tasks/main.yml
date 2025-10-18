@@ -1,0 +1,86 @@
+---
+- name: Ensure pfSense API token is provided
+  assert:
+    that:
+      - pfsense_api_token | length > 0
+    fail_msg: "pfsense_api_token must be provided to configure HAProxy"
+
+- name: Initialize pfSense payload containers
+  set_fact:
+    pfsense_backends: []
+    pfsense_frontends: []
+
+- name: Build pfSense backend payloads
+  set_fact:
+    pfsense_backends: "{{ pfsense_backends + [ backend_payload ] }}"
+  loop: "{{ edge_ingress_backends | default([]) }}"
+  loop_control:
+    loop_var: edge_backend
+  vars:
+    backend_payload: >-
+      {{ {
+        'name': edge_backend.service_id,
+        'balance': 'roundrobin',
+        'health_check_enabled': True,
+        'health_check_method': 'GET',
+        'health_check_path': edge_backend.path_prefix if edge_backend.path_prefix != '/' else '/',
+        'servers': [
+          {
+            'name': edge_backend.service_id + '-primary',
+            'address': edge_backend.exports.APP_BACKEND_IP,
+            'port': edge_backend.exports.APP_PORT,
+            'ssl': edge_backend.scheme == 'https'
+          }
+        ]
+      } | to_json | from_json }}
+
+- name: Build pfSense frontend payloads
+  set_fact:
+    pfsense_frontends: "{{ pfsense_frontends + [ frontend_payload ] }}"
+  loop: "{{ edge_ingress_backends | default([]) }}"
+  loop_control:
+    loop_var: edge_backend
+  vars:
+    frontend_payload: >-
+      {{ {
+        'name': edge_backend.router_name,
+        'listen_addresses': [
+          {
+            'address': bind.address | string,
+            'port': bind.port | string,
+            'ssl': bind.tls
+          } for bind in pfsense_ingress_bind_addresses
+        ],
+        'rules': ([{'type': 'host', 'value': edge_backend.exports.APP_FQDN}] + ([{'type': 'path_beg', 'value': edge_backend.path_prefix}] if edge_backend.path_prefix != '/' else [])),
+        'default_backend': edge_backend.service_id,
+        'tls_enabled': edge_backend.tls,
+        'tls_certificate_ref': pfsense_tls_cert_ref if pfsense_tls_cert_ref else ''
+      } | to_json | from_json }}
+
+- name: Push HAProxy configuration to pfSense
+  uri:
+    url: "{{ pfsense_api_scheme }}://{{ pfsense_api_host }}:{{ pfsense_api_port }}/api/v1/services/haproxy/config"
+    method: POST
+    headers:
+      Authorization: "{{ pfsense_api_token }}"
+    validate_certs: "{{ pfsense_api_verify_ssl }}"
+    body_format: json
+    status_code: 200
+    body:
+      frontends: {{ pfsense_frontends }}
+      backends: {{ pfsense_backends }}
+  register: pfsense_config_result
+  no_log: true
+
+- name: Apply HAProxy configuration on pfSense
+  when: pfsense_apply_changes
+  uri:
+    url: "{{ pfsense_api_scheme }}://{{ pfsense_api_host }}:{{ pfsense_api_port }}/api/v1/services/haproxy/apply"
+    method: POST
+    headers:
+      Authorization: "{{ pfsense_api_token }}"
+    validate_certs: "{{ pfsense_api_verify_ssl }}"
+    status_code: 200
+    body_format: json
+    body: {}
+  no_log: true

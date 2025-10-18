@@ -1,0 +1,12 @@
+---
+edge_ingress_contracts: []
+edge_ingress_required_keys:
+  - APP_FQDN
+  - APP_PORT
+  - APP_BACKEND_IP
+edge_ingress_defaults:
+  scheme: http
+  router_entrypoint: web
+  tls: false
+  tls_certresolver: null
+  path_prefix: /

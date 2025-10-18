@@ -1,0 +1,91 @@
+---
+- name: Ensure OPNsense API credentials are provided
+  assert:
+    that:
+      - opnsense_api_key | length > 0
+      - opnsense_api_secret | length > 0
+    fail_msg: "opnsense_api_key and opnsense_api_secret must be provided to configure HAProxy"
+
+- name: Initialize OPNsense payload containers
+  set_fact:
+    opnsense_backends: []
+    opnsense_frontends: []
+
+- name: Build OPNsense backend payloads
+  set_fact:
+    opnsense_backends: "{{ opnsense_backends + [ backend_payload ] }}"
+  loop: "{{ edge_ingress_backends | default([]) }}"
+  loop_control:
+    loop_var: edge_backend
+  vars:
+    backend_payload: >-
+      {{ {
+        'name': edge_backend.service_id,
+        'mode': 'http',
+        'retries': 3,
+        'httpcheck_method': 'GET',
+        'httpcheck_path': edge_backend.path_prefix if edge_backend.path_prefix != '/' else '/',
+        'servers': [
+          {
+            'name': edge_backend.service_id + '-primary',
+            'address': edge_backend.exports.APP_BACKEND_IP,
+            'port': edge_backend.exports.APP_PORT,
+            'ssl': 'true' if edge_backend.scheme == 'https' else 'false',
+            'verify': 'false'
+          }
+        ]
+      } | to_json | from_json }}
+
+- name: Build OPNsense frontend payloads
+  set_fact:
+    opnsense_frontends: "{{ opnsense_frontends + [ frontend_payload ] }}"
+  loop: "{{ edge_ingress_backends | default([]) }}"
+  loop_control:
+    loop_var: edge_backend
+  vars:
+    frontend_payload: >-
+      {{ {
+        'name': edge_backend.router_name,
+        'mode': 'http',
+        'default_backend': edge_backend.service_id,
+        'rules': ([{'type': 'Host', 'value': edge_backend.exports.APP_FQDN}] + ([{'type': 'PathPrefix', 'value': edge_backend.path_prefix}] if edge_backend.path_prefix != '/' else [])),
+        'binds': [
+          {
+            'address': bind.address | string,
+            'port': bind.port | string,
+            'ssl': 'true' if bind.tls else 'false'
+          } for bind in opnsense_ingress_bind_addresses
+        ],
+        'tls_enabled': 'true' if edge_backend.tls else 'false',
+        'tls_certificate': opnsense_tls_certificate_id if opnsense_tls_certificate_id else ''
+      } | to_json | from_json }}
+
+- name: Push HAProxy configuration to OPNsense
+  uri:
+    url: "{{ opnsense_api_scheme }}://{{ opnsense_api_host }}:{{ opnsense_api_port }}/api/haproxy/service/bulkImport"
+    method: POST
+    user: "{{ opnsense_api_key }}"
+    password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: "{{ opnsense_api_verify_ssl }}"
+    body_format: json
+    status_code: 200
+    body:
+      backends: {{ opnsense_backends }}
+      frontends: {{ opnsense_frontends }}
+  register: opnsense_bulk_import
+  no_log: true
+
+- name: Apply HAProxy configuration on OPNsense
+  when: opnsense_apply_changes
+  uri:
+    url: "{{ opnsense_api_scheme }}://{{ opnsense_api_host }}:{{ opnsense_api_port }}/api/haproxy/service/reconfigure"
+    method: POST
+    user: "{{ opnsense_api_key }}"
+    password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    validate_certs: "{{ opnsense_api_verify_ssl }}"
+    status_code: 200
+    body_format: json
+    body: {}
+  no_log: true
