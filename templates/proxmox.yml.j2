@@ -33,13 +33,7 @@
 {% set feature_ns = namespace(value=None) %}
 {% if container.features is defined %}
   {% if container.features %}
-    {% if container.features is string %}
-      {% set feature_ns.value = container.features %}
-    {% elif container.features is sequence %}
-      {% set feature_ns.value = container.features | join(',') %}
-    {% else %}
-      {% set feature_ns.value = container.features | string %}
-    {% endif %}
+    {% set feature_ns.value = container.features | join(',') %}
   {% else %}
     {% set feature_ns.value = '' %}
   {% endif %}
