@@ -1,0 +1,12 @@
+---
+- name: Restart containerd
+  ansible.builtin.systemd:
+    name: containerd
+    state: restarted
+  when: ansible_service_mgr == 'systemd'
+
+- name: Restart kubelet
+  ansible.builtin.systemd:
+    name: kubelet
+    state: restarted
+  when: ansible_service_mgr == 'systemd'

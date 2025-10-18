@@ -1,0 +1,9 @@
+---
+- name: Restart SSH service
+  ansible.builtin.service:
+    name: "{{ 'sshd' if ansible_os_family == 'RedHat' else 'ssh' }}"
+    state: restarted
+
+- name: Validate sudoers configuration
+  ansible.builtin.command: visudo -cf /etc/sudoers
+  changed_when: false

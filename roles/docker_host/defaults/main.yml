@@ -1,0 +1,5 @@
+---
+docker_host_users: []  # list of usernames to add to docker group
+docker_host_enable_service: true
+docker_host_daemon_config: {}
+docker_host_compose_version: latest

@@ -1,0 +1,15 @@
+---
+- name: Gather package facts for Kubernetes role
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Include Debian family Kubernetes setup
+  ansible.builtin.include_tasks: debian.yml
+  when: ansible_os_family == 'Debian'
+
+- name: Include Red Hat family Kubernetes setup
+  ansible.builtin.include_tasks: redhat.yml
+  when: ansible_os_family == 'RedHat'
+
+- name: Apply common Kubernetes host configuration
+  ansible.builtin.import_tasks: common.yml

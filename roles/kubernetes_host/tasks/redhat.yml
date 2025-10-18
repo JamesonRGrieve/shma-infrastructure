@@ -1,0 +1,45 @@
+---
+- name: Install Kubernetes prerequisites on Red Hat family
+  ansible.builtin.dnf:
+    name:
+      - curl
+      - gnupg2
+      - iptables
+      - ebtables
+    state: present
+    update_cache: true
+
+- name: Enable Kubernetes repository gpg key
+  ansible.builtin.get_url:
+    url: "{{ kubernetes_repo_base.get(ansible_distribution, kubernetes_repo_base.get('AlmaLinux')) }}repodata/repomd.xml.key"
+    dest: /etc/pki/rpm-gpg/RPM-GPG-KEY-kubernetes
+    mode: '0644'
+
+- name: Import Kubernetes GPG key
+  ansible.builtin.rpm_key:
+    state: present
+    key: /etc/pki/rpm-gpg/RPM-GPG-KEY-kubernetes
+
+- name: Configure Kubernetes repository
+  ansible.builtin.copy:
+    dest: /etc/yum.repos.d/kubernetes.repo
+    content: |
+      [kubernetes]
+      name=Kubernetes
+      baseurl={{ kubernetes_repo_base.get(ansible_distribution, kubernetes_repo_base.get('AlmaLinux')) }}
+      enabled=1
+      gpgcheck=1
+      gpgkey={{ kubernetes_repo_base.get(ansible_distribution, kubernetes_repo_base.get('AlmaLinux')) }}repodata/repomd.xml.key
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Install container runtime packages
+  ansible.builtin.dnf:
+    name: "{{ kubernetes_cni_packages }}"
+    state: present
+
+- name: Install Kubernetes components
+  ansible.builtin.dnf:
+    name: "{{ kubernetes_packages.get(ansible_distribution, kubernetes_packages.get('AlmaLinux', [])) }}"
+    state: present

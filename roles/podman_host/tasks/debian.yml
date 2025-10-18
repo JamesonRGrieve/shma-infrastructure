@@ -1,0 +1,15 @@
+---
+- name: Update apt cache for Podman host
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Upgrade packages on Podman host
+  ansible.builtin.apt:
+    upgrade: dist
+    autoremove: true
+
+- name: Install Podman dependencies on Debian family
+  ansible.builtin.apt:
+    name: "{{ podman_host_packages.get(ansible_distribution, podman_host_packages.get(ansible_os_family, [])) }}"
+    state: present

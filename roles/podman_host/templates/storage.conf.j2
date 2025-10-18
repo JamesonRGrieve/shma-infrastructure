@@ -1,0 +1,8 @@
+[storage]
+driver = "overlay"
+runroot = "/run/user/{{ podman_host_uid }}/containers"
+graphroot = "/home/{{ podman_host_user }}/.local/share/containers/storage"
+[storage.options]
+additionalimagestores = []
+[storage.options.overlay]
+mount_program = "/usr/bin/fuse-overlayfs"

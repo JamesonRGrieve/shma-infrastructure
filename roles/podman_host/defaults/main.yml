@@ -1,0 +1,14 @@
+---
+podman_host_user: podman
+podman_host_user_shell: /bin/bash
+podman_host_user_comment: Podman Service User
+podman_host_uid_range_start: 100000
+podman_host_uid_range_size: 65536
+podman_host_runtime_path: /usr/bin/podman
+podman_host_secure_wrapper_path: /usr/local/bin/secure-podman
+podman_host_log_dir: /var/log/containers
+podman_host_enable_firewalld: true
+podman_host_firewalld_zone: trusted
+podman_host_cron_minute: 0
+podman_host_cron_hour: 2
+podman_host_prune_command: /usr/bin/podman system prune -f

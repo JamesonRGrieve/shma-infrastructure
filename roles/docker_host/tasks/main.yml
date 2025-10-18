@@ -1,0 +1,11 @@
+---
+- name: Include Debian family setup
+  ansible.builtin.include_tasks: debian.yml
+  when: ansible_os_family == 'Debian'
+
+- name: Include Red Hat family setup
+  ansible.builtin.include_tasks: redhat.yml
+  when: ansible_os_family == 'RedHat'
+
+- name: Include common Docker configuration
+  ansible.builtin.import_tasks: common.yml

@@ -1,0 +1,47 @@
+---
+- name: Update packages on Podman host
+  ansible.builtin.dnf:
+    name: "*"
+    state: latest
+    update_cache: true
+
+- name: Install Podman dependencies on Red Hat family
+  ansible.builtin.dnf:
+    name: "{{ podman_host_packages.get(ansible_distribution, podman_host_packages.get('AlmaLinux', [])) }}"
+    state: present
+    disable_gpg_check: false
+
+- name: Ensure firewalld is installed for Podman networking
+  ansible.builtin.dnf:
+    name: firewalld
+    state: present
+
+- name: Enable firewalld for Podman hosts
+  ansible.builtin.systemd:
+    name: firewalld
+    state: started
+    enabled: true
+  when: podman_host_enable_firewalld
+
+- name: Permit Podman bridge interfaces through firewalld
+  ansible.posix.firewalld:
+    zone: "{{ podman_host_firewalld_zone }}"
+    state: enabled
+    interface: "{{ item }}"
+    permanent: true
+    immediate: true
+  loop:
+    - cni-podman0
+    - podman0
+  when: podman_host_enable_firewalld
+  ignore_errors: true
+
+- name: Allow masquerading for Podman networking
+  ansible.posix.firewalld:
+    zone: public
+    masquerade: true
+    state: enabled
+    permanent: true
+    immediate: true
+  when: podman_host_enable_firewalld
+  ignore_errors: true

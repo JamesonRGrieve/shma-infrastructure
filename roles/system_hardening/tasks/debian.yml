@@ -1,0 +1,99 @@
+---
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Upgrade packages to latest available
+  ansible.builtin.apt:
+    upgrade: dist
+    autoremove: true
+
+- name: Ensure unattended upgrades configuration is present
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |-
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Ensure ufw is installed
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+
+- name: Configure ufw default policies
+  ansible.builtin.command: "{{ item }}"
+  args:
+    warn: false
+  loop:
+    - ufw default deny incoming
+    - ufw default allow outgoing
+  changed_when: false
+
+- name: Allow SSH and Cockpit in ufw
+  ansible.builtin.command: "ufw allow {{ item }}"
+  args:
+    warn: false
+  loop:
+    - "{{ hardening_ssh_port }}/tcp"
+    - 9090/tcp
+  changed_when: false
+
+- name: Enable ufw firewall
+  ansible.builtin.command: ufw --force enable
+  args:
+    warn: false
+  changed_when: false
+
+- name: Deploy fail2ban SSH jail configuration
+  ansible.builtin.template:
+    src: fail2ban_ssh.conf.j2
+    dest: /etc/fail2ban/jail.d/ssh.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Enable security related services
+  ansible.builtin.service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop:
+    - unattended-upgrades
+    - fail2ban
+    - auditd
+    - acct
+    - clamav-freshclam
+    - clamav-daemon
+
+- name: Update rkhunter databases
+  ansible.builtin.command: "{{ item }}"
+  changed_when: false
+  failed_when: false
+  loop:
+    - rkhunter --propupd
+    - rkhunter --update
+  when: ansible_facts.packages.get('rkhunter') is defined
+
+- name: Initialize AIDE database on Debian-based hosts
+  ansible.builtin.command: aideinit
+  register: aide_init_result
+  changed_when: aide_init_result.rc == 0
+  when:
+    - ansible_facts.packages.get('aide') is defined
+    - not hardening_aide_db.stat.exists
+
+- name: Record AIDE database initialization on Debian hosts
+  ansible.builtin.set_fact:
+    hardening_aide_db:
+      stat:
+        exists: true
+  when:
+    - ansible_facts.packages.get('aide') is defined
+    - aide_init_result is defined
+    - aide_init_result.rc == 0
+

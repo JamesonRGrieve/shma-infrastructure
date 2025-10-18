@@ -1,0 +1,35 @@
+---
+docker_host_prereq_packages:
+  Debian:
+    - ca-certificates
+    - curl
+    - gnupg
+    - lsb-release
+  Ubuntu:
+    - ca-certificates
+    - curl
+    - gnupg
+    - lsb-release
+  AlmaLinux:
+    - yum-utils
+    - device-mapper-persistent-data
+    - lvm2
+docker_host_package_map:
+  Debian:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+    - docker-buildx-plugin
+    - docker-compose-plugin
+  Ubuntu:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+    - docker-buildx-plugin
+    - docker-compose-plugin
+  AlmaLinux:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+    - docker-buildx-plugin
+    - docker-compose-plugin
