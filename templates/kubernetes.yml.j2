@@ -45,6 +45,7 @@
 {% set resources = service_resources | default({'memory_mb': 256, 'cpu_cores': 1}) %}
 {% set memory_request = resources.memory_mb | default(256) %}
 {% set cpu_cores = resources.cpu_cores | default(1) %}
+{% set connections_per_second = resources.connections_per_second if resources.connections_per_second is defined else None %}
 {% set volume_config = service_volume | default(service_volumes[0] if service_volumes is defined and service_volumes | length > 0 else None) %}
 {% set use_host_path = volume_config is mapping and volume_config.host_path is defined %}
 {% set host_path = volume_config.host_path if use_host_path else None %}
@@ -149,7 +150,13 @@ spec:
             - name: {{ item.name }}
               value: {{ item.value }}
 {% endfor %}
+
+{% if connections_per_second %}
+            - name: CONNECTIONS_PER_SECOND
+              value: "{{ connections_per_second }}"
+
 {% endif %}
+
 {% endif %}
           ports:
             - containerPort: {{ container_port }}
