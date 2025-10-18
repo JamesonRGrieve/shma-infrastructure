@@ -1,0 +1,16 @@
+graph LR
+    A[Service Definition] --> B{Requires Dependencies?}
+    B -->|Yes| C[Load Required Services]
+    B -->|No| D[Render Templates]
+    C --> E[Resolve Exports]
+    E --> D
+    D --> F[Apply to Target]
+    F --> G[Health Check]
+    G --> H{Healthy?}
+    H -->|Yes| I[Register Exports]
+    H -->|No| J[Fail Deployment]
+    I --> K[Available for Dependents]
+    
+    style A fill:#e3f2fd
+    style K fill:#c8e6c9
+    style J fill:#ffcdd2

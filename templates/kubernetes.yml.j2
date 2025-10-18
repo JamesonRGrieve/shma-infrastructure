@@ -1,0 +1,95 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mariadb-secrets
+  namespace: {{ k8s_namespace | default('default') }}
+type: Opaque
+stringData:
+  root-password: {{ mariadb_root_password }}
+  user-password: {{ mariadb_user_password }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mariadb-data
+  namespace: {{ k8s_namespace | default('default') }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ mariadb_storage_gb }}Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mariadb
+  namespace: {{ k8s_namespace | default('default') }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mariadb
+  template:
+    metadata:
+      labels:
+        app: mariadb
+    spec:
+      containers:
+      - name: mariadb
+        image: mariadb:{{ version }}
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secrets
+              key: root-password
+        - name: MYSQL_DATABASE
+          value: {{ mariadb_database }}
+        - name: MYSQL_USER
+          value: {{ mariadb_user }}
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secrets
+              key: user-password
+        ports:
+        - containerPort: 3306
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/mysql
+        livenessProbe:
+          exec:
+            command:
+            - mysqladmin
+            - ping
+            - -h
+            - localhost
+          initialDelaySeconds: 30
+          periodSeconds: {{ health.interval | default('10s') | regex_replace('s$', '') | int }}
+          timeoutSeconds: {{ health.timeout | default('5s') | regex_replace('s$', '') | int }}
+        resources:
+          requests:
+            memory: {{ mariadb_memory }}Mi
+            cpu: {{ mariadb_cores * 1000 }}m
+          limits:
+            memory: {{ mariadb_memory }}Mi
+            cpu: {{ mariadb_cores * 1000 }}m
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: mariadb-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb
+  namespace: {{ k8s_namespace | default('default') }}
+spec:
+  selector:
+    app: mariadb
+  ports:
+  - port: 3306
+    targetPort: 3306
+  type: ClusterIP

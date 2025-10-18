@@ -1,0 +1,8 @@
+---
+- name: Deploy with Docker Compose
+  community.docker.docker_compose:
+    project_src: "{{ runtime_output_dir }}"
+    files:
+      - "{{ runtime_config_path | basename }}"
+    state: present
+    pull: yes

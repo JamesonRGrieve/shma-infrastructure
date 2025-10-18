@@ -1,0 +1,29 @@
+[Unit]
+Description=MariaDB Database
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=docker.io/library/mariadb:{{ version }}
+ContainerName={{ mariadb_hostname }}
+AutoUpdate=registry
+
+Environment=MYSQL_ROOT_PASSWORD={{ mariadb_root_password }}
+Environment=MYSQL_DATABASE={{ mariadb_database }}
+Environment=MYSQL_USER={{ mariadb_user }}
+Environment=MYSQL_PASSWORD={{ mariadb_user_password }}
+
+Volume=mariadb-data.volume:/var/lib/mysql:Z
+PublishPort={{ mariadb_ip }}:3306:3306
+
+HealthCmd=mysqladmin ping -h localhost
+HealthInterval={{ health.interval | default('10s') }}
+HealthTimeout={{ health.timeout | default('5s') }}
+HealthRetries={{ health.retries | default(3) }}
+
+[Service]
+Restart=always
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target default.target

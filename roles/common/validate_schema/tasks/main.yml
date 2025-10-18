@@ -1,0 +1,26 @@
+---
+- name: Load service schema
+  set_fact:
+    service_schema: "{{ lookup('file', '../../schemas/service.schema.yml') | from_yaml }}"
+
+- name: Validate service contract exists
+  assert:
+    that:
+      - service_id is defined
+      - exports is defined
+      - storage is defined
+      - health is defined
+      - runtime_templates is defined
+    fail_msg: "Service {{ service_id }} is missing required contract fields"
+
+- name: Validate required dependencies exist
+  assert:
+    that:
+      - item in groups['all'] or item == service_id
+    fail_msg: "Required dependency {{ item }} not found in inventory"
+  loop: "{{ requires | default([]) }}"
+  when: requires is defined and requires | length > 0
+
+- name: Service contract validated
+  debug:
+    msg: "✓ Service {{ service_id }} contract is valid"

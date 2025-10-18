@@ -1,0 +1,44 @@
+---
+type: object
+required:
+  - service_id
+  - exports
+  - storage
+  - health
+  - runtime_templates
+properties:
+  service_id:
+    type: string
+  version:
+    type: string
+  requires:
+    type: array
+    items:
+      type: string
+  exports:
+    type: object
+    properties:
+      env:
+        type: array
+        items:
+          type: object
+          required: [name, value]
+  storage:
+    type: array
+    items:
+      type: object
+      required: [name, path]
+  health:
+    type: object
+    required: [cmd]
+    properties:
+      cmd:
+        type: array
+      interval:
+        type: string
+      timeout:
+        type: string
+      retries:
+        type: integer
+  runtime_templates:
+    type: object

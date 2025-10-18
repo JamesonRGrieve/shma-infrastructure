@@ -1,0 +1,57 @@
+---
+- name: Load LXC configuration
+  set_fact:
+    lxc_config: "{{ lookup('file', runtime_config_path) | from_yaml }}"
+
+- name: Create LXC container
+  community.general.proxmox:
+    vmid: "{{ lxc_config.container.vmid }}"
+    hostname: "{{ lxc_config.container.hostname }}"
+    node: "{{ proxmox_node }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_password: "{{ proxmox_api_password }}"
+    api_host: "{{ proxmox_api_host }}"
+    ostemplate: "{{ lxc_config.container.ostemplate }}"
+    disk: "{{ lxc_config.container.disk }}"
+    cores: "{{ lxc_config.container.cores }}"
+    memory: "{{ lxc_config.container.memory }}"
+    swap: "{{ lxc_config.container.swap }}"
+    netif: "{{ lxc_config.container.netif }}"
+    onboot: "{{ lxc_config.container.onboot }}"
+    unprivileged: "{{ lxc_config.container.unprivileged }}"
+    state: present
+
+- name: Start container
+  community.general.proxmox:
+    vmid: "{{ lxc_config.container.vmid }}"
+    node: "{{ proxmox_node }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_password: "{{ proxmox_api_password }}"
+    api_host: "{{ proxmox_api_host }}"
+    state: started
+
+- name: Wait for container SSH
+  wait_for:
+    host: "{{ lxc_config.container.netif.net0.split('ip=')[1].split('/')[0] }}"
+    port: 22
+    delay: 5
+    timeout: 60
+
+- name: Install packages in container
+  delegate_to: "{{ lxc_config.container.netif.net0.split('ip=')[1].split('/')[0] }}"
+  apt:
+    name: "{{ lxc_config.setup.packages }}"
+    state: present
+    update_cache: yes
+
+- name: Write config files
+  delegate_to: "{{ lxc_config.container.netif.net0.split('ip=')[1].split('/')[0] }}"
+  copy:
+    content: "{{ item.content }}"
+    dest: "{{ item.path }}"
+  loop: "{{ lxc_config.setup.config | default([]) }}"
+
+- name: Run setup commands
+  delegate_to: "{{ lxc_config.container.netif.net0.split('ip=')[1].split('/')[0] }}"
+  shell: "{{ item }}"
+  loop: "{{ lxc_config.setup.commands }}"

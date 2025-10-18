@@ -1,0 +1,31 @@
+---
+- name: Check if runtime is supported
+  assert:
+    that:
+      - runtime in runtime_templates.keys()
+    fail_msg: "Runtime {{ runtime }} not supported by service {{ service_id }}"
+
+- name: Get template path for runtime
+  set_fact:
+    runtime_template: "{{ runtime_templates[runtime] }}"
+    runtime_output_dir: "/tmp/ansible-runtime/{{ service_id }}"
+
+- name: Create output directory
+  file:
+    path: "{{ runtime_output_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Render runtime configuration
+  template:
+    src: "{{ runtime_template }}"
+    dest: "{{ runtime_output_dir }}/{{ runtime }}.yml"
+  register: rendered_config
+
+- name: Set runtime output path
+  set_fact:
+    runtime_config_path: "{{ rendered_config.dest }}"
+
+- name: Runtime rendered
+  debug:
+    msg: "✓ Rendered {{ service_id }} for {{ runtime }} runtime at {{ runtime_config_path }}"

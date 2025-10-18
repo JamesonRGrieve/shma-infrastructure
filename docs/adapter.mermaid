@@ -1,0 +1,39 @@
+classDiagram
+    class RuntimeAdapter {
+        +deploy(config)
+        +validate_config()
+        +health_check()
+    }
+    
+    class LXCAdapter {
+        +create_container()
+        +configure_container()
+        +start_container()
+    }
+    
+    class ComposeAdapter {
+        +write_compose_file()
+        +docker_compose_up()
+    }
+    
+    class QuadletAdapter {
+        +write_container_file()
+        +systemctl_enable()
+    }
+    
+    class K8sAdapter {
+        +apply_manifests()
+        +wait_for_ready()
+    }
+    
+    class BaremetalAdapter {
+        +install_packages()
+        +configure_systemd()
+        +start_service()
+    }
+    
+    RuntimeAdapter <|-- LXCAdapter
+    RuntimeAdapter <|-- ComposeAdapter
+    RuntimeAdapter <|-- QuadletAdapter
+    RuntimeAdapter <|-- K8sAdapter
+    RuntimeAdapter <|-- BaremetalAdapter

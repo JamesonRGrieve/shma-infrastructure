@@ -1,0 +1,6 @@
+---
+- name: Apply Kubernetes manifests
+  kubernetes.core.k8s:
+    state: present
+    src: "{{ runtime_config_path }}"
+    namespace: "{{ k8s_namespace | default('default') }}"

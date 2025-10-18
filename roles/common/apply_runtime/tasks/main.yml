@@ -1,0 +1,16 @@
+---
+- name: Execute runtime-specific deployment
+  include_tasks: "{{ runtime }}.yml"
+
+- name: Health check after deployment
+  command: "{{ health.cmd | join(' ') }}"
+  delegate_to: "{{ service_ip | default(ansible_default_ipv4.address) }}"
+  retries: "{{ health.retries | default(3) }}"
+  delay: "{{ health.interval | default('10s') | regex_replace('s$', '') | int }}"
+  register: health_result
+  until: health_result.rc == 0
+  when: health is defined
+
+- name: Deployment complete
+  debug:
+    msg: "✓ Service {{ service_id }} deployed successfully on {{ runtime }}"

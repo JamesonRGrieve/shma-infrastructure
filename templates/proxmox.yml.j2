@@ -1,0 +1,35 @@
+---
+container:
+  vmid: "{{ mariadb_container_id }}"
+  hostname: "{{ mariadb_hostname }}"
+  ostemplate: "{{ proxmox_template | default('local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst') }}"
+  disk: "{{ mariadb_storage_gb }}"
+  cores: "{{ mariadb_cores }}"
+  memory: "{{ mariadb_memory }}"
+  swap: "{{ mariadb_memory }}"
+  netif:
+    net0: "name=eth0,bridge=vmbr0,ip={{ mariadb_ip }}/24,gw={{ gateway }}"
+  onboot: yes
+  unprivileged: yes
+
+setup:
+  packages:
+    - mariadb-server
+    - mariadb-client
+    - python3-pymysql
+  
+  config:
+    - path: /etc/mysql/mariadb.conf.d/99-custom.cnf
+      content: |
+        [mysqld]
+        bind-address = 0.0.0.0
+        max_connections = 200
+  
+  commands:
+    - systemctl enable mariadb
+    - systemctl start mariadb
+    - mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '{{ mariadb_root_password }}';"
+    - mysql -u root -p'{{ mariadb_root_password }}' -e "CREATE DATABASE IF NOT EXISTS {{ mariadb_database }};"
+    - mysql -u root -p'{{ mariadb_root_password }}' -e "CREATE USER IF NOT EXISTS '{{ mariadb_user }}'@'%' IDENTIFIED BY '{{ mariadb_user_password }}';"
+    - mysql -u root -p'{{ mariadb_root_password }}' -e "GRANT ALL PRIVILEGES ON {{ mariadb_database }}.* TO '{{ mariadb_user }}'@'%';"
+    - mysql -u root -p'{{ mariadb_root_password }}' -e "FLUSH PRIVILEGES;"

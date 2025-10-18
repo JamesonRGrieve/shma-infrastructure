@@ -1,0 +1,44 @@
+flowchart TB
+    Start([ansible-playbook deploy.yml]) --> LoadEnv[Load Environment Config]
+    LoadEnv --> LoadService[Load Service Definition]
+    
+    LoadService --> Validate{Validate Schema}
+    Validate -->|Invalid| Error1[❌ Fail: Schema Error]
+    Validate -->|Valid| CheckDeps{Check Dependencies}
+    
+    CheckDeps -->|Missing| Error2[❌ Fail: Missing Dependency]
+    CheckDeps -->|OK| Render[Render Runtime Template]
+    
+    Render --> SelectRuntime{Select Runtime}
+    
+    SelectRuntime -->|lxc| RenderLXC[Generate LXC Config]
+    SelectRuntime -->|compose| RenderCompose[Generate docker-compose.yml]
+    SelectRuntime -->|quadlet| RenderQuadlet[Generate .container file]
+    SelectRuntime -->|k8s| RenderK8s[Generate K8s manifests]
+    SelectRuntime -->|baremetal| RenderSystemd[Generate systemd unit]
+    
+    RenderLXC --> ApplyLXC[Proxmox API: Create Container]
+    RenderCompose --> ApplyCompose[docker-compose up]
+    RenderQuadlet --> ApplyQuadlet[systemctl enable/start]
+    RenderK8s --> ApplyK8s[kubectl apply]
+    RenderSystemd --> ApplySystemd[systemctl enable/start]
+    
+    ApplyLXC --> Setup[Configure Service]
+    ApplyCompose --> Setup
+    ApplyQuadlet --> Setup
+    ApplyK8s --> Setup
+    ApplySystemd --> Setup
+    
+    Setup --> Health{Health Check}
+    Health -->|Fail| Error3[❌ Deployment Failed]
+    Health -->|Pass| Success[✅ Deployment Complete]
+    
+    Success --> Exports[Register Service Exports]
+    Exports --> End([Ready for Dependent Services])
+    
+    style Start fill:#e1f5fe
+    style End fill:#c8e6c9
+    style Error1 fill:#ffcdd2
+    style Error2 fill:#ffcdd2
+    style Error3 fill:#ffcdd2
+    style Success fill:#a5d6a7

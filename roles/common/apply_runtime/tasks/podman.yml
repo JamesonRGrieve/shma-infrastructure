@@ -1,0 +1,16 @@
+---
+- name: Copy Quadlet container file
+  copy:
+    src: "{{ runtime_config_path }}"
+    dest: "/etc/containers/systemd/{{ service_id }}.container"
+    mode: '0644'
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+
+- name: Enable and start container
+  systemd:
+    name: "{{ service_id }}"
+    enabled: yes
+    state: started

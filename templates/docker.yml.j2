@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  mariadb:
+    image: mariadb:{{ version }}
+    container_name: {{ mariadb_hostname }}
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: {{ mariadb_root_password }}
+      MYSQL_DATABASE: {{ mariadb_database }}
+      MYSQL_USER: {{ mariadb_user }}
+      MYSQL_PASSWORD: {{ mariadb_user_password }}
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    ports:
+      - "{{ mariadb_ip }}:3306:3306"
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: {{ health.interval | default('10s') }}
+      timeout: {{ health.timeout | default('5s') }}
+      retries: {{ health.retries | default(3) }}
+
+volumes:
+  mariadb-data:
+    driver: local
+
+networks:
+  app-network:
+    driver: bridge

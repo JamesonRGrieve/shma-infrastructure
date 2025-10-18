@@ -1,0 +1,31 @@
+sequenceDiagram
+    participant User
+    participant Ansible
+    participant Validator
+    participant Renderer
+    participant Adapter
+    participant Target
+    
+    User->>Ansible: ansible-playbook -e runtime=lxc
+    Ansible->>Validator: Load service contract
+    Validator->>Validator: Check schema
+    Validator->>Validator: Verify dependencies
+    Validator-->>Ansible: ✓ Valid
+    
+    Ansible->>Renderer: Render for runtime=lxc
+    Renderer->>Renderer: Select template
+    Renderer->>Renderer: Apply variables
+    Renderer-->>Ansible: Generated config
+    
+    Ansible->>Adapter: Apply with LXC adapter
+    Adapter->>Target: Create container (Proxmox API)
+    Target-->>Adapter: Container created
+    Adapter->>Target: Install packages
+    Adapter->>Target: Configure service
+    Adapter->>Target: Start service
+    Target-->>Adapter: Service running
+    
+    Adapter->>Target: Run health check
+    Target-->>Adapter: Health OK
+    Adapter-->>Ansible: Deployment complete
+    Ansible-->>User: ✅ Service deployed
