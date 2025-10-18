@@ -16,62 +16,85 @@
       - runtime_templates is defined
     fail_msg: "Service {{ service_id | default('unknown') }} is missing required contract fields"
 
-- name: Initialize dependency registry
+- name: Initialize dependency registry sources
   set_fact:
-    dependency_registry_entries: []
+    dependency_registry_sources: []
 
 - name: Load dependency registry from file
   set_fact:
     dependency_registry_source: "{{ lookup('file', dependency_registry_file) | from_yaml }}"
   when: dependency_registry_file is defined
 
-- name: Normalize dependency registry from file
+- name: Append dependency registry from file
   set_fact:
-    dependency_registry_entries: >-
-      {{
-        dependency_registry_entries
-        + (
-          dependency_registry_source.dependencies
-          if (dependency_registry_source is mapping and dependency_registry_source.dependencies is defined)
-          else (
-            dependency_registry_source.keys() | list
-            if dependency_registry_source is mapping
-            else (
-              [dependency_registry_source]
-              if dependency_registry_source is string
-              else (dependency_registry_source | default([]))
-            )
-          )
-        )
-      }}
+    dependency_registry_sources: >-
+      {{ dependency_registry_sources + [dependency_registry_source] }}
   when: dependency_registry_file is defined
 
-- name: Append inline dependency registry entries
+- name: Append inline dependency registry
   set_fact:
-    dependency_registry_entries: >-
+    dependency_registry_sources: >-
       {{
-        dependency_registry_entries
-        + (
-          [dependency_registry]
-          if dependency_registry is string
-          else (dependency_registry | default([]))
-        )
+        dependency_registry_sources
+        + [dependency_registry]
       }}
   when: dependency_registry is defined
 
-- name: Deduplicate dependency registry entries
+- name: Normalize dependency registry
   set_fact:
-    dependency_registry_entries: "{{ dependency_registry_entries | default([]) | unique }}"
+    dependency_registry_entries: >-
+      {{ dependency_registry_sources | default([]) | merge_dependency_registries }}
 
-- name: Validate required dependencies exist
+- name: Normalize service requirements
+  set_fact:
+    service_requires_normalized: "{{ requires | default([]) | normalize_requirements }}"
+  when: requires is defined
+
+- name: Validate dependency version requirements when available
   assert:
     that:
-      - item in dependency_registry_entries
+      - dependency_registry_entries[item.name].version is defined
+      - dependency_registry_entries[item.name].version == item.version
     fail_msg: >-
-      Required dependency {{ item }} not found in dependency registry. Provide
-      dependency_registry or dependency_registry_file with available exports.
-  loop: "{{ requires | default([]) }}"
-  when: requires is defined and requires | length > 0
+      Dependency {{ item.name }} version mismatch. Required {{ item.version | default('unspecified') }},
+      registry provides {{ dependency_registry_entries[item.name].version if item.name in dependency_registry_entries else 'none' }}.
+  loop: "{{ service_requires_normalized | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - service_requires_normalized is defined
+    - service_requires_normalized | length > 0
+    - item.version is defined
+    - item.name in dependency_registry_entries
+
+- name: Validate dependency exports hash requirements when available
+  assert:
+    that:
+      - dependency_registry_entries[item.name].exports_hash is defined
+      - dependency_registry_entries[item.name].exports_hash == item.exports_hash
+    fail_msg: >-
+      Dependency {{ item.name }} exports hash mismatch. Required {{ item.exports_hash | default('unspecified') }},
+      registry provides {{ dependency_registry_entries[item.name].exports_hash if item.name in dependency_registry_entries else 'none' }}.
+  loop: "{{ service_requires_normalized | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - service_requires_normalized is defined
+    - service_requires_normalized | length > 0
+    - item.exports_hash is defined
+    - item.name in dependency_registry_entries
+
+- name: Detect dependency cycles
+  set_fact:
+    dependency_cycle_paths: >-
+      {{ dependency_registry_entries | dependency_graph_cycles(service_id, service_requires_normalized | default([])) }}
+
+- name: Validate dependency graph has no cycles
+  assert:
+    that:
+      - dependency_cycle_paths | default([]) | length == 0
+    fail_msg: >-
+      Dependency cycle detected: {{ dependency_cycle_paths | join('; ') }}
 
 - name: Validate secret environment values are not placeholders
   assert:

@@ -98,7 +98,8 @@ Traefik entrypoint), and exposes a structured `edge_ingress_backends` variable.
 Renders a file-provider configuration at `/etc/traefik/dynamic/ingress.yml`. The
 configuration builds one router and service per backend and honours TLS and
 middleware hints from the contract. Reloads are issued via `systemctl reload
-traefik` by default.
+traefik` by default and are preceded by `traefik --validate=true` to catch
+syntax errors before the service restarts.
 
 ### `edge_proxy_haproxy`
 
@@ -108,6 +109,68 @@ issued using the path prefix (or `/` by default). The generated configuration is
 validated with `haproxy -c -f` before the service reloads, ensuring syntax
 errors never reach production. The handler then reloads HAProxy using the
 configured command.
+
+The rendered configuration defaults to `/usr/local/etc/haproxy/ingress.cfg` and
+respects the variables defined in `roles/edge_proxy_haproxy/defaults/main.yml`.
+Key toggles include:
+
+- `haproxy_bind_http` / `haproxy_http_bind_address` – enable and control the
+  clear-text listener (defaults to `*:80`).
+- `haproxy_bind_https` / `haproxy_https_bind_address` – enable TLS termination
+  when paired with a PEM bundle exposed through `haproxy_https_cert`.
+- `haproxy_default_options` – append stock HAProxy options (`httplog`,
+  `forwardfor`, etc.) to the `defaults` block.
+
+When a service publishes `path_prefix` values the role emits the ACL wiring
+required to restrict routes. Health checks follow that same prefix so upstreams
+must respond with success codes. A minimal HTTP-only render for an
+`auth-service` backend looks like:
+
+```haproxy
+global
+  maxconn 2048
+
+defaults
+  mode http
+  timeout connect 5s
+  timeout client  50s
+  timeout server  50s
+  option httplog
+  option dontlognull
+  option http-server-close
+  option forwardfor
+
+frontend http_ingress
+  bind *:80
+  mode http
+  acl host_auth-service hdr(host) -i auth.internal.example
+  use_backend auth-service if host_auth-service
+
+backend auth-service
+  mode http
+  option httpchk
+  http-check send meth GET uri /
+  server auth-service 10.10.12.8:8443 check
+```
+
+Enabling TLS termination only requires toggling `haproxy_bind_https: true` and
+pointing `haproxy_https_cert` at a PEM bundle containing the certificate chain
+and private key. The role emits a dedicated `https_ingress` frontend that shares
+the same ACL logic:
+
+```haproxy
+frontend https_ingress
+  bind *:443 ssl crt /usr/local/etc/haproxy/tls.pem
+  mode http
+  acl host_auth-service hdr(host) -i auth.internal.example
+  use_backend auth-service if host_auth-service
+```
+
+Middleware-style hints, such as header rewrites or prefix stripping, can be
+implemented by extending the template or injecting static configuration via
+`haproxy_extra_config` blocks before reloading. The role keeps the generated
+section isolated so operators can include additional `backend` or `frontend`
+snippets through native HAProxy includes.
 
 ### `edge_opnsense`
 
@@ -155,13 +218,19 @@ configuration posts to `/api/v1/services/squid/reverse_proxy` and applies with
 the standard `/api/v1/services/squid/apply` endpoint when
 `pfsense_squid_apply_changes` is true (default).
 
-### `edge_proxy_traefik`
+## Middleware support matrix
 
-Renders a file-provider configuration at `/etc/traefik/dynamic/ingress.yml`. The
-configuration builds one router and service per backend and honours TLS and
-middleware hints from the contract. Reloads are issued via `systemctl reload
-traefik` by default and are now preceded by `traefik --validate=true` to catch
-syntax errors before the service restarts.
+The ingress contract exposes several optional hints. The table below summarises
+which adapters consume them without additional customization:
+
+| Capability | Traefik (file provider) | HAProxy (stand-alone) | OPNsense HAProxy | OPNsense Nginx | OPNsense Caddy | pfSense HAProxy | pfSense Squid |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Host-based routing | ✅ routers honour `APP_FQDN` | ✅ ACLs route by host header | ✅ Frontends match host rules | ✅ Server blocks map hosts | ✅ Route matchers mirror host | ✅ Frontends match host rules | ✅ Reverse proxy entries keyed by host |
+| Path prefix routing | ✅ `PathPrefix` rules per backend | ✅ ACLs guard per-prefix routes | ✅ Additional HAProxy rules generated | ✅ Location blocks per prefix | ✅ Matchers include prefix | ✅ Additional HAProxy rules generated | ✅ Reverse proxy paths per backend |
+| TLS termination | ✅ Per-backend toggle via `tls`/`tls_certresolver` | ⚠️ Global via `haproxy_bind_https`; requires PEM bundle | ✅ Controlled by `opnsense_ingress_bind_addresses` + `tls` | ✅ Controlled by bind definitions and certificate IDs | ✅ Automatically emits TLS policies when `tls` is true | ✅ Controlled by bind definitions and certificate IDs | ⚠️ Relies on upstream TLS; Squid terminates HTTPS only when configured globally |
+| Middleware / header rewrites | ✅ `middlewares` list mapped directly | ⚠️ Manual via template extension or includes | ⚠️ Requires custom automation against OPNsense API | ⚠️ Requires custom directives | ⚠️ Requires custom directives | ⚠️ Requires custom automation | ⚠️ Requires manual ACL configuration |
+| Preserve/forward host headers | ✅ `passHostHeader` and `preserve_host` flags supported | ✅ Backend servers receive host header by default | ✅ Backends inherit original headers | ✅ Upstreams preserve headers | ✅ Upstreams preserve headers | ✅ Backends inherit original headers | ⚠️ Requires custom squid tweaks |
+| HTTP health checks | ✅ Traefik reuses backend URL | ✅ `option httpchk` per backend | ✅ HTTP checks configured per backend | ✅ Health checks per upstream | ✅ Health checks per upstream | ✅ HTTP checks configured per backend | ✅ Health monitoring via reverse-proxy checks |
 
 ## Security considerations
 

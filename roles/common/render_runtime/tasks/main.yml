@@ -11,6 +11,35 @@
       {{ mounts.ephemeral_mounts | default([]) | map(attribute='path') | list }}
   when: mounts is defined and mounts.ephemeral_mounts is defined
 
+- name: Normalize service dependency requirements
+  set_fact:
+    render_service_requires: "{{ requires | default([]) | normalize_requirements }}"
+  when: requires is defined
+
+- name: Ensure dependency exports provided for required services
+  assert:
+    that:
+      - dependency_exports is defined
+      - dependency_exports is mapping
+    fail_msg: >-
+      Service {{ service_id }} declares dependencies but dependency_exports is not provided.
+  when:
+    - render_service_requires is defined
+    - render_service_requires | length > 0
+
+- name: Validate required dependency exports are available
+  assert:
+    that:
+      - item.name in dependency_exports
+    fail_msg: >-
+      Required dependency {{ item.name }} missing from dependency_exports.
+  loop: "{{ render_service_requires | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - render_service_requires is defined
+    - render_service_requires | length > 0
+
 - name: Validate ephemeral mounts excluded from persistent backups
   assert:
     that:
@@ -29,6 +58,63 @@
     that:
       - runtime in runtime_templates.keys()
     fail_msg: "Runtime {{ runtime }} not supported by service {{ service_id }}"
+
+- name: Validate Kubernetes runtime requirements
+  assert:
+    that:
+      - service_ip is defined
+      - (service_ip | string | length) > 0
+    fail_msg: >-
+      Kubernetes runtime requires service_ip to be explicitly provided for health checks and routing.
+  when: runtime == 'kubernetes'
+
+- name: Validate Proxmox runtime requirements
+  assert:
+    that:
+      - service_ip is defined
+      - service_container is defined
+    fail_msg: >-
+      Proxmox runtime requires service_ip and service_container configuration to be provided.
+  when: runtime == 'proxmox'
+
+- name: Initialize compose service name accumulator
+  set_fact:
+    render_compose_service_names: []
+  when:
+    - runtime in ['docker', 'podman']
+    - services is defined
+    - services | length > 0
+
+- name: Collect compose service names from services list
+  set_fact:
+    render_compose_service_names: >-
+      {{
+        (render_compose_service_names | default([]))
+        + [item.name | default(item.container_name | default(service_name | default(service_id)))]
+      }}
+  loop: "{{ services }}"
+  loop_control:
+    label: "{{ item.name | default(item.container_name | default(service_name | default(service_id))) }}"
+  when:
+    - runtime in ['docker', 'podman']
+    - services is defined
+    - services | length > 0
+
+- name: Fallback compose service name when services list is absent
+  set_fact:
+    render_compose_service_names:
+      - "{{ service_name | default(service_id) }}"
+  when:
+    - runtime in ['docker', 'podman']
+    - (services is not defined) or (services | length == 0)
+
+- name: Detect compose service name collisions
+  assert:
+    that:
+      - (render_compose_service_names | default([])) | length == (render_compose_service_names | default([]) | unique | length)
+    fail_msg: >-
+      Duplicate service_name values detected for {{ runtime }} runtime. service_name values must be unique: {{ render_compose_service_names | default([]) | join(', ') }}.
+  when: runtime in ['docker', 'podman']
 
 - name: Get template path for runtime
   set_fact:

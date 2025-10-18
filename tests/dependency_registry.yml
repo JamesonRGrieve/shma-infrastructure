@@ -1,0 +1,18 @@
+---
+dependencies:
+  sample-service:
+    version: "1.27.0"
+    exports_hash: "b6a8fbea0c94d6b5f7713b09363eb76a5cb5824ef1ed2fa2cec0f1a8f08fd0c2"
+    exports:
+      env:
+        - name: SAMPLE_SERVICE_URL
+          value: https://sample-service.internal
+    requires:
+      - name: shared-cache
+        version: "2024.05"
+  shared-cache:
+    version: "2024.05"
+    exports:
+      env:
+        - name: SHARED_CACHE_URL
+          value: redis://shared-cache.internal:6379
