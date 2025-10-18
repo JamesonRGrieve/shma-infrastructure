@@ -1,0 +1,37 @@
+---
+- name: Default ingress model service from service_spec
+  ansible.builtin.set_fact:
+    ingress_model_service: "{{ service_spec | default({}) }}"
+  when: ingress_model_service is not defined
+
+- name: Ensure ingress schema file exists
+  ansible.builtin.stat:
+    path: "{{ ingress_schema_path }}"
+  register: ingress_schema_stat
+
+- name: Validate ingress schema availability
+  ansible.builtin.assert:
+    that:
+      - ingress_schema_stat.stat.exists
+    fail_msg: >-
+      Ingress schema not found at {{ ingress_schema_path }}. Set ingress_schema_path to a valid file.
+
+- name: Determine ingress owner label
+  ansible.builtin.set_fact:
+    ingress_model_owner: >-
+      {{ ingress_owner | default(ingress_model_service.service_id | default('unknown')) }}
+
+- name: Build ingress model
+  ingress_model:
+    service: "{{ ingress_model_service }}"
+    schema_path: "{{ ingress_schema_path }}"
+    managed_by: "{{ ingress_managed_by }}"
+    owner: "{{ ingress_model_owner }}"
+  register: ingress_model_result
+
+- name: Register ingress modeling facts
+  ansible.builtin.set_fact:
+    ingress_enabled: "{{ ingress_model_result.ingress_enabled }}"
+    ingress_metadata: "{{ ingress_model_result.metadata | default({}) }}"
+    ingress_edge_config: "{{ ingress_model_result.edge_config | default([]) }}"
+    ingress_normalized: "{{ ingress_model_result.normalized_ingress | default({}) }}"

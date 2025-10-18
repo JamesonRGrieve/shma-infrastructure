@@ -1,0 +1,31 @@
+service_id: webapp
+service_name: Web Application
+service_image: ghcr.io/example/web:latest
+exports:
+  env:
+    - name: BASE_URL
+      value: https://web.example.test
+mounts:
+  persistent_volumes: []
+  ephemeral_mounts: []
+health:
+  cmd:
+    - /bin/true
+runtime_templates:
+  podman: ../templates/podman.yml.j2
+ingress:
+  enabled: true
+  routes:
+    - host: web.example.test
+      port: 8000
+      path_prefix: "/"
+      tls:
+        mode: auto
+        acme:
+          challenge: dns
+          dns_provider: cloudflare
+          email: ops@example.test
+      headers:
+        set:
+          - "X-Frame-Options: DENY"
+          - "X-Content-Type-Options: nosniff"
