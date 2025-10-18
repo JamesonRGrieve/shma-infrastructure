@@ -1,9 +1,21 @@
-"""Filters for working with dependency registries and requirements."""
-
 from __future__ import annotations
 
 from collections.abc import Iterable
 from typing import Any
+
+
+class RegistryFormatError(ValueError):
+    """Raised when a registry fragment does not match the expected format."""
+
+
+def _ensure_mapping(value: Any, context: str) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if value is None:
+        return {}
+    raise RegistryFormatError(
+        f"{context} must be a mapping of keys to values; received {value!r} instead."
+    )
 
 
 def _normalize_requirement(item: Any) -> dict[str, Any]:
@@ -11,7 +23,6 @@ def _normalize_requirement(item: Any) -> dict[str, Any]:
     if isinstance(item, str):
         return {"name": item}
     if isinstance(item, dict):
-        # Accept either already normalized mappings or minimal dicts.
         if "name" in item and isinstance(item["name"], str):
             normalized = {"name": item["name"]}
             if item.get("version") is not None:
@@ -19,7 +30,6 @@ def _normalize_requirement(item: Any) -> dict[str, Any]:
             if item.get("exports_hash") is not None:
                 normalized["exports_hash"] = item["exports_hash"]
             return normalized
-        # When provided as {service_name: {...}} allow the key to serve as name.
         if len(item) == 1:
             key, value = next(iter(item.items()))
             if isinstance(value, dict):
@@ -37,7 +47,6 @@ def normalize_requirements(requirements: Any) -> list[dict[str, Any]]:
     if not requirements:
         return []
     if isinstance(requirements, dict):
-        # Interpret mapping of name -> metadata.
         normalized: list[dict[str, Any]] = []
         for name, meta in requirements.items():
             entry = {"name": name}
@@ -55,71 +64,71 @@ def normalize_requirements(requirements: Any) -> list[dict[str, Any]]:
     return [_normalize_requirement(requirements)]
 
 
-def _normalize_dependency_entry(entry: Any) -> dict[str, Any]:
-    if entry is None:
-        return {}
-    if isinstance(entry, dict):
-        normalized: dict[str, Any] = {}
-        for key in ("version", "exports_hash", "exports"):
-            if entry.get(key) is not None:
-                normalized[key] = entry[key]
-        if "requires" in entry:
-            normalized["requires"] = normalize_requirements(entry["requires"])
-        return normalized
-    if isinstance(entry, str):
-        return {"version": entry} if entry else {}
-    raise ValueError(f"Unsupported dependency entry: {entry!r}")
-
-
 def normalize_dependency_registry(registry: Any) -> dict[str, dict[str, Any]]:
     """Normalize registry input into a mapping of dependency name -> metadata."""
     if not registry:
         return {}
 
-    if isinstance(registry, (str, bytes)):
-        name = registry.decode() if isinstance(registry, bytes) else registry
-        return {name: {}}
+    source = registry
+    if isinstance(registry, dict) and "dependencies" in registry:
+        source = registry["dependencies"]
 
-    if isinstance(registry, dict):
-        if "dependencies" in registry:
-            return normalize_dependency_registry(registry["dependencies"])
-        normalized: dict[str, dict[str, Any]] = {}
-        for name, value in registry.items():
-            if isinstance(value, dict) and "name" in value and value["name"] != name:
-                # Allow nested entries storing the name within their mapping.
-                entry_name = value["name"]
-                normalized[entry_name] = _normalize_dependency_entry(value)
-            else:
-                normalized[name] = _normalize_dependency_entry(value)
-        return normalized
+    if not isinstance(source, dict):
+        raise RegistryFormatError(
+            "Dependency registry must be a mapping of dependency names to metadata. "
+            f"Received {type(source).__name__}: {source!r}."
+        )
 
-    if isinstance(registry, Iterable) and not isinstance(registry, (str, bytes)):
-        normalized: dict[str, dict[str, Any]] = {}
-        for item in registry:
-            if isinstance(item, str):
-                normalized[item] = {}
-            elif isinstance(item, dict):
-                if "name" not in item:
-                    raise ValueError(f"Dependency entry missing name: {item!r}")
-                name = item["name"]
-                normalized[name] = _normalize_dependency_entry(item)
-            else:
-                raise ValueError(f"Unsupported dependency registry entry: {item!r}")
-        return normalized
+    normalized: dict[str, dict[str, Any]] = {}
+    for raw_name, raw_metadata in source.items():
+        if not isinstance(raw_name, str) or not raw_name:
+            raise RegistryFormatError(
+                "Dependency registry keys must be non-empty strings. "
+                f"Received key {raw_name!r}."
+            )
 
-    raise ValueError(f"Unsupported dependency registry value: {registry!r}")
+        metadata = _ensure_mapping(
+            raw_metadata,
+            context=f"Dependency '{raw_name}' metadata",
+        )
+
+        entry: dict[str, Any] = {}
+        for key in ("version", "exports_hash", "exports"):
+            if key in metadata and metadata[key] is not None:
+                entry[key] = metadata[key]
+        if "requires" in metadata and metadata["requires"] is not None:
+            entry["requires"] = normalize_requirements(metadata["requires"])
+        normalized[raw_name] = entry
+
+    return normalized
 
 
 def merge_dependency_registries(registries: Iterable[Any]) -> dict[str, dict[str, Any]]:
     """Merge multiple registry fragments into a single normalized mapping."""
     result: dict[str, dict[str, Any]] = {}
+
     for registry in registries or []:
         if not registry:
             continue
+
         normalized = normalize_dependency_registry(registry)
         for name, metadata in normalized.items():
-            existing = result.get(name, {})
-            merged = existing.copy()
+            existing = result.get(name)
+            if existing and "version" in metadata:
+                existing_version = existing.get("version")
+                new_version = metadata.get("version")
+                if (
+                    existing_version is not None
+                    and new_version is not None
+                    and existing_version != new_version
+                ):
+                    raise RegistryFormatError(
+                        "Conflicting versions detected for dependency "
+                        f"'{name}': existing={existing_version!r}, "
+                        f"incoming={new_version!r}."
+                    )
+
+            merged = existing.copy() if existing else {}
             for key, value in metadata.items():
                 if key == "requires":
                     existing_requires = normalize_requirements(
@@ -132,6 +141,7 @@ def merge_dependency_registries(registries: Iterable[Any]) -> dict[str, dict[str
                 else:
                     merged[key] = value
             result[name] = merged
+
     return result
 
 

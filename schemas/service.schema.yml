@@ -310,6 +310,10 @@ properties:
               type: string
             mode:
               type: string
+      shred_waiver_reason:
+        type: string
+        description: >-
+          Mandatory justification when secrets.shred_after_apply is overridden to false.
   runtime_templates:
     type: object
   service_security:

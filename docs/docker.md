@@ -81,7 +81,8 @@ networks:
 
 - `secrets.env` entries become environment variables supplied directly to the Compose CLI; values stay in-memory during deployment.
 - `secrets.files` entries create files in `secrets/<name>` and populate the Compose `secrets` map.
-- `secrets.shred_after_apply` defaults to `true`, removing rendered secrets after deployment unless you explicitly opt out.
+- `secrets.shred_after_apply` defaults to `true`, removing rendered secrets after deployment. When you must retain the artifacts,
+  set `secrets.shred_after_apply: false` and record the rationale in `secrets.shred_waiver_reason`.
 - `secrets.rotation_timestamp` (optional) forces Compose to recreate containers whenever you bump the value—use it to rotate credentials without editing unrelated settings.
 - `service_ports` control host bindings; publish only the ports you intend to expose.
 - `service_volumes.host_path` mounts host directories directly, which keeps containers ephemeral while the data persists on the host. Omit the key to fall back to managed named volumes.
@@ -105,7 +106,16 @@ docker compose -f /tmp/ansible-runtime/sample-service/docker.yml config
 
 1. Prepares the optional `secrets/` directory for file-based secrets.
 2. Invokes `community.docker.docker_compose_v2` with `pull: always`, injecting secret environment variables through Ansible's `environment` parameter.
-3. Shreds rendered secrets by default; set `secrets.shred_after_apply: false` for workloads that must retain them on disk.
+3. Shreds rendered secrets by default; set `secrets.shred_after_apply: false` only with a documented `secrets.shred_waiver_reason`
+   that justifies the risk of keeping plaintext artifacts on disk.
+
+### Secret transport differences
+
+Docker injects `secrets.env` values directly into the Compose execution environment while the containers start. Kubernetes, by
+contrast, materialises secrets as mounted files, and Podman Quadlet follows the Docker behaviour. When migrating from Docker or
+Podman to Kubernetes, convert any secrets that workloads read from environment variables into file-based reads or populate the
+same values in ConfigMaps/Secrets mounted under `secrets.files`. The reverse migration—Kubernetes to Docker/Podman—requires you
+to shift file consumers to read from environment variables or render the desired files with `secrets.files` during deploy time.
 4. Sets `service_ip` for the unified health gate.
 5. Recreates containers automatically whenever `secrets.rotation_timestamp` changes.
 

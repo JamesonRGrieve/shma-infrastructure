@@ -82,7 +82,8 @@ For `quadlet_scope: user`, the environment file and secrets live under `~/.confi
 2. Writes the env file for `secrets.env` entries and optional secret files (with `0400` default permissions).
 3. Copies the `.container` unit.
 4. Executes `systemd` tasks with the correct scope and reloads daemons.
-5. Shreds rendered secrets by default; set `secrets.shred_after_apply: false` only when you need to retain them for debugging.
+5. Shreds rendered secrets by default; set `secrets.shred_after_apply: false` only when you provide a `secrets.shred_waiver_reason`
+   documenting the business case for retaining them.
 6. Sets `service_ip` for the post-deploy health gate.
 7. Bounces the unit automatically whenever `secrets.rotation_timestamp` changes.
 
@@ -114,3 +115,10 @@ systemctl --user start sample-service
 
   Use `signedBy` (GPG) or `sigstoreSigned` rules so Podman verifies content instead of blindly trusting TLS alone.
 - Keep `docker-daemon` denied unless you must ingest images from the local engine; if so, override the transport mapping explicitly for that host.
+### Secret transport differences
+
+Quadlet mirrors Docker's behaviour: `secrets.env` are exported as environment variables during the `systemd` start, while
+`secrets.files` create transient files. Kubernetes mounts everything as files. When moving a workload from Podman to Kubernetes,
+convert environment consumers to read from mounted files or replicate the values under `secrets.files`. Moving from Kubernetes
+back to Podman requires turning file-based reads into environment variables or continuing to use `secrets.files` so Quadlet
+renders the expected payloads.
