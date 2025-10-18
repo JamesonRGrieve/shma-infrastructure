@@ -101,22 +101,39 @@ secrets:
 
 Downstream applications consume these exports by resolving them through a dependency registry shared between repositories. Provide the registry as a list of known dependencies either inline (`dependency_registry`) or via `dependency_registry_file`:
 
+
 ```yaml
 # dependency-registry.yml
 dependencies:
-  - sample-service
-  - shared-cache
+  sample-service:
+    version: "1.27.0"
+    exports:
+      env:
+        - name: SAMPLE_SERVICE_URL
+          value: https://sample-service.internal
+    requires:
+      - name: shared-cache
+        version: "2024.05"
+  shared-cache:
+    exports:
+      env:
+        - name: SHARED_CACHE_URL
+          value: redis://shared-cache.internal:6379
 ```
 
 A dependent service can then declare its expectations and map resolved values (for example through a `dependency_exports` variable populated from the registry and exported environment files):
 
 ```yaml
 requires:
-  - sample-service
+  - name: sample-service
+    version: "1.27.0"
 
 service_env:
   - name: UPSTREAM_URL
     value: "{{ dependency_exports['sample-service'].SAMPLE_SERVICE_URL }}"
+
+The `requires` entries can also include an `exports_hash` if downstream services need
+to assert exact contract signatures instead of semantic versions.
 ```
 
 The registry keeps validation decoupled from the Ansible inventory while ensuring every declared dependency is fulfilled by an exported contract.

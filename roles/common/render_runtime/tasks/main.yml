@@ -11,6 +11,35 @@
       {{ mounts.ephemeral_mounts | default([]) | map(attribute='path') | list }}
   when: mounts is defined and mounts.ephemeral_mounts is defined
 
+- name: Normalize service dependency requirements
+  set_fact:
+    render_service_requires: "{{ requires | default([]) | normalize_requirements }}"
+  when: requires is defined
+
+- name: Ensure dependency exports provided for required services
+  assert:
+    that:
+      - dependency_exports is defined
+      - dependency_exports is mapping
+    fail_msg: >-
+      Service {{ service_id }} declares dependencies but dependency_exports is not provided.
+  when:
+    - render_service_requires is defined
+    - render_service_requires | length > 0
+
+- name: Validate required dependency exports are available
+  assert:
+    that:
+      - item.name in dependency_exports
+    fail_msg: >-
+      Required dependency {{ item.name }} missing from dependency_exports.
+  loop: "{{ render_service_requires | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - render_service_requires is defined
+    - render_service_requires | length > 0
+
 - name: Validate ephemeral mounts excluded from persistent backups
   assert:
     that:

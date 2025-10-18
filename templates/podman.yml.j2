@@ -33,7 +33,7 @@
 {% endif %}
 {% set env_file_path = quadlet_base_dir ~ '/' ~ (service_name | default(service_id)) ~ '.env' %}
 {% set secret_dir = quadlet_base_dir ~ '/secrets' %}
-{% set ports = service_ports | default((service_port is defined) | ternary([service_port], [])) %}
+{% set ports = service_ports | default([]) %}
 {% set volumes = service_volumes | default([]) %}
 {% set inline_env = service_env | default([]) %}
 {% set auto_update_mode = quadlet_auto_update | default('none') %}
