@@ -27,21 +27,21 @@ podman info | grep -i quadlet
 
 ```ini
 [Unit]
-Description=MariaDB Database
+Description=Managed container for sample-service
 After=network-online.target
 Wants=network-online.target
 
 [Container]
-Image=docker.io/library/mariadb:10.11
-ContainerName=mariadb-sample
+Image=docker.io/library/nginx:1.27
+ContainerName=sample-service
 AutoUpdate=registry
-Environment=MYSQL_DATABASE=sampledb
-Environment=MYSQL_USER=sample
-EnvironmentFile=/etc/containers/systemd/mariadb-sample.env
-Volume=mariadb-data.volume:/var/lib/mysql:Z
-PublishPort=192.0.2.50:3306:3306
-Volume=/etc/containers/systemd/secrets/ca-cert:/etc/mysql/certs/ca.pem:ro,Z
-HealthCmd=mysqladmin ping -h 127.0.0.1 -P 3306
+Environment=APP_MODE=production
+Environment=APP_FEATURE_FLAG=true
+EnvironmentFile=/etc/containers/systemd/sample-service.env
+Volume=sample-service-config.volume:/etc/sample-service:Z
+PublishPort=192.0.2.50:8080:8080
+Volume=/etc/containers/systemd/secrets/tls-cert:/etc/sample-service/certs/tls.crt:ro,Z
+HealthCmd=/bin/sh -c exit 0
 HealthInterval=10s
 HealthTimeout=5s
 HealthRetries=3
@@ -54,7 +54,7 @@ TimeoutStartSec=900
 WantedBy=multi-user.target default.target
 ```
 
-For `quadlet_scope: user`, the environment file and secrets live under `~/.config/containers/systemd/` and the unit should be managed with `systemctl --user`.
+For `quadlet_scope: user`, the environment file and secrets live under `~/.config/containers/systemd/`. Enable lingering or ensure user services start at boot so the unit remains active.
 
 ## Deployment workflow
 
@@ -64,13 +64,14 @@ For `quadlet_scope: user`, the environment file and secrets live under `~/.confi
 2. Writes the env file and optional secret files (with `0400` default permissions).
 3. Copies the `.container` unit.
 4. Executes `systemd` tasks with the correct scope and reloads daemons.
-5. Sets `service_ip` for the post-deploy health gate.
+5. Optionally shreds rendered secrets when `secrets.shred_after_apply` is enabled.
+6. Sets `service_ip` for the post-deploy health gate.
 
 Ensure lingering is enabled when deploying user-scoped units:
 
 ```bash
 loginctl enable-linger $USER
 systemctl --user daemon-reload
-systemctl --user enable mariadb
-systemctl --user start mariadb
+systemctl --user enable sample-service
+systemctl --user start sample-service
 ```

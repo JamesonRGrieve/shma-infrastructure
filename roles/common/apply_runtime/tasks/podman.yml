@@ -14,6 +14,7 @@
   set_fact:
     quadlet_secret_env: "{{ secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] }}"
     quadlet_secret_files: "{{ secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] }}"
+    quadlet_secret_shred: "{{ secrets.shred_after_apply | default(false) if secrets is defined else false }}"
 
 - name: Deduplicate quadlet secret environment variables
   set_fact:
@@ -76,6 +77,35 @@
     enabled: yes
     state: started
     scope: "{{ quadlet_effective_scope }}"
+
+- name: Remove Quadlet environment file after apply
+  file:
+    path: "{{ quadlet_env_path }}"
+    state: absent
+  when:
+    - quadlet_secret_shred | bool
+    - quadlet_secret_env | length > 0
+  become: {{ (quadlet_effective_scope == 'system') | bool }}
+
+- name: Remove Quadlet secret files after apply
+  file:
+    path: "{{ quadlet_secret_dir }}/{{ item.name }}"
+    state: absent
+  loop: "{{ quadlet_secret_files }}"
+  when:
+    - quadlet_secret_shred | bool
+    - quadlet_secret_files | length > 0
+  no_log: true
+  become: {{ (quadlet_effective_scope == 'system') | bool }}
+
+- name: Remove Quadlet secret directory after apply
+  file:
+    path: "{{ quadlet_secret_dir }}"
+    state: absent
+  when:
+    - quadlet_secret_shred | bool
+    - quadlet_secret_files | length > 0
+  become: {{ (quadlet_effective_scope == 'system') | bool }}
 
 - name: Set service IP for health checks
   set_fact:

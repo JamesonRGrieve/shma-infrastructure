@@ -7,7 +7,14 @@ on:
 
 jobs:
   lint-and-validate:
+    name: "Lint and validate (${{ matrix.lane }})"
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [stable, latest]
+    env:
+      SAMPLE_SERVICE_ID: sample-service
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -23,16 +30,22 @@ jobs:
           pip install ansible ansible-lint yamllint jsonschema pyyaml
 
       - name: Install Ansible collections
-        run: |
-          ansible-galaxy collection install community.general community.docker community.mysql kubernetes.core
+        run: ansible-galaxy collection install -r ci/collections-${{ matrix.lane }}.yml
 
       - name: Verify Docker Compose availability
         run: docker compose version
 
-      - name: Set up kubectl
+      - name: Set up kubectl (stable)
+        if: matrix.lane == 'stable'
         uses: azure/setup-kubectl@v3
         with:
           version: 'v1.29.3'
+
+      - name: Set up kubectl (latest)
+        if: matrix.lane == 'latest'
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
 
       - name: Validate schema definition
         run: python ci/validate_schema.py
@@ -48,28 +61,28 @@ jobs:
         run: ansible-playbook tests/render.yml -e runtime=proxmox
 
       - name: Validate Proxmox manifest
-        run: yamllint /tmp/ansible-runtime/mariadb/proxmox.yml
+        run: yamllint /tmp/ansible-runtime/${{ env.SAMPLE_SERVICE_ID }}/proxmox.yml
 
       - name: Render Docker Compose configuration
         run: ansible-playbook tests/render.yml -e runtime=docker
 
       - name: Validate Docker Compose manifest
-        run: docker compose -f /tmp/ansible-runtime/mariadb/docker.yml config
+        run: docker compose -f /tmp/ansible-runtime/${{ env.SAMPLE_SERVICE_ID }}/docker.yml config
 
       - name: Render Podman Quadlet configuration
         run: ansible-playbook tests/render.yml -e runtime=podman
 
       - name: Validate Quadlet unit
-        run: systemd-analyze verify /tmp/ansible-runtime/mariadb/podman.yml
+        run: systemd-analyze verify /tmp/ansible-runtime/${{ env.SAMPLE_SERVICE_ID }}/podman.yml
 
       - name: Render bare-metal systemd configuration
         run: ansible-playbook tests/render.yml -e runtime=baremetal
 
       - name: Validate systemd unit
-        run: systemd-analyze verify /tmp/ansible-runtime/mariadb/baremetal.yml
+        run: systemd-analyze verify /tmp/ansible-runtime/${{ env.SAMPLE_SERVICE_ID }}/baremetal.yml
 
       - name: Render Kubernetes manifests
         run: ansible-playbook tests/render.yml -e runtime=kubernetes
 
       - name: Validate Kubernetes manifest
-        run: kubectl apply --dry-run=client --validate=true -f /tmp/ansible-runtime/mariadb/kubernetes.yml
+        run: kubectl apply --dry-run=client --validate=true -f /tmp/ansible-runtime/${{ env.SAMPLE_SERVICE_ID }}/kubernetes.yml

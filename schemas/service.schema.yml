@@ -190,6 +190,13 @@ properties:
         items:
           type: object
           required: [name, value]
+          properties:
+            name:
+              type: string
+            value:
+              type: string
+            description:
+              type: string
   storage:
     type: array
     items:
@@ -210,6 +217,8 @@ properties:
   secrets:
     type: object
     properties:
+      shred_after_apply:
+        type: boolean
       env:
         type: array
         items:

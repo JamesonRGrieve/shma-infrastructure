@@ -15,11 +15,60 @@
       - runtime_templates is defined
     fail_msg: "Service {{ service_id | default('unknown') }} is missing required contract fields"
 
+- name: Initialize dependency registry
+  set_fact:
+    dependency_registry_entries: []
+
+- name: Load dependency registry from file
+  set_fact:
+    dependency_registry_source: "{{ lookup('file', dependency_registry_file) | from_yaml }}"
+  when: dependency_registry_file is defined
+
+- name: Normalize dependency registry from file
+  set_fact:
+    dependency_registry_entries: >-
+      {{
+        dependency_registry_entries
+        + (
+          dependency_registry_source.dependencies
+          if (dependency_registry_source is mapping and dependency_registry_source.dependencies is defined)
+          else (
+            dependency_registry_source.keys() | list
+            if dependency_registry_source is mapping
+            else (
+              [dependency_registry_source]
+              if dependency_registry_source is string
+              else (dependency_registry_source | default([]))
+            )
+          )
+        )
+      }}
+  when: dependency_registry_file is defined
+
+- name: Append inline dependency registry entries
+  set_fact:
+    dependency_registry_entries: >-
+      {{
+        dependency_registry_entries
+        + (
+          [dependency_registry]
+          if dependency_registry is string
+          else (dependency_registry | default([]))
+        )
+      }}
+  when: dependency_registry is defined
+
+- name: Deduplicate dependency registry entries
+  set_fact:
+    dependency_registry_entries: "{{ dependency_registry_entries | default([]) | unique }}"
+
 - name: Validate required dependencies exist
   assert:
     that:
-      - item in groups['all'] or item == service_id
-    fail_msg: "Required dependency {{ item }} not found in inventory"
+      - item in dependency_registry_entries
+    fail_msg: >-
+      Required dependency {{ item }} not found in dependency registry. Provide
+      dependency_registry or dependency_registry_file with available exports.
   loop: "{{ requires | default([]) }}"
   when: requires is defined and requires | length > 0
 
