@@ -4,6 +4,41 @@
 {% set file_list = service_files | default([]) %}
 {% set svc_list = service_services | default([]) %}
 {% set cmd_list = service_commands | default([]) %}
+{% set pkg_names = namespace(items=[]) %}
+{% for pkg in pkg_list %}
+  {% if pkg is string %}
+    {% set pkg_name = pkg %}
+  {% elif pkg.name is defined %}
+    {% set pkg_name = pkg.name %}
+  {% else %}
+    {% set pkg_name = '' %}
+  {% endif %}
+  {% if pkg_name %}
+    {% set _ = pkg_names.items.append(pkg_name | lower) %}
+  {% endif %}
+{% endfor %}
+{% set feature_ns = namespace(value=None) %}
+{% if container.features is defined %}
+  {% if container.features %}
+    {% if container.features is string %}
+      {% set feature_ns.value = container.features %}
+    {% elif container.features is sequence %}
+      {% set feature_ns.value = container.features | join(',') %}
+    {% else %}
+      {% set feature_ns.value = container.features | string %}
+    {% endif %}
+  {% else %}
+    {% set feature_ns.value = '' %}
+  {% endif %}
+{% endif %}
+{% if feature_ns.value is none %}
+  {% set nested_indicators = ['docker', 'docker-ce', 'docker.io', 'podman', 'podman-docker', 'containerd', 'buildah'] %}
+  {% for indicator in nested_indicators %}
+    {% if indicator in pkg_names.items %}
+      {% set feature_ns.value = 'nesting=1,keyctl=1' %}
+    {% endif %}
+  {% endfor %}
+{% endif %}
 container_ip: "{{ service_ip }}"
 container:
   vmid: "{{ container.vmid | default(service_id) }}"
@@ -17,7 +52,9 @@ container:
     net0: "name={{ container.interface | default('eth0') }},bridge={{ container.bridge | default('vmbr0') }},ip={{ service_ip }}/{{ container.cidr | default(24) }}{% if container.gateway is defined %},gw={{ container.gateway }}{% elif service_gateway is defined %},gw={{ service_gateway }}{% endif %}"
   onboot: {{ container.onboot | default('yes') }}
   unprivileged: {{ container.unprivileged | default('yes') }}
-  features: "{{ container.features | default('nesting=1,keyctl=1') }}"
+{% if feature_ns.value %}
+  features: "{{ feature_ns.value }}"
+{% endif %}
 
 setup:
   packages:{% if pkg_list | length == 0 %} []{% else %}

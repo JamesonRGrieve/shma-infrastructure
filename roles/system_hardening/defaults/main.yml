@@ -37,6 +37,8 @@ hardening_umask_targets:
 hardening_aide_db_path: /var/lib/aide/aide.db.gz
 hardening_aide_new_db_path: /var/lib/aide/aide.db.new.gz
 hardening_firewalld_zone: public
-hardening_firewalld_services:
-  - cockpit
+hardening_firewalld_services: []
 hardening_firewalld_ports: []
+hardening_enable_cockpit: false
+hardening_cockpit_listen_address: 127.0.0.1
+hardening_cockpit_allowed_sources: []

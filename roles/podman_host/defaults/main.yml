@@ -12,3 +12,10 @@ podman_host_firewalld_zone: trusted
 podman_host_cron_minute: 0
 podman_host_cron_hour: 2
 podman_host_prune_command: /usr/bin/podman system prune -f
+podman_host_policy_default:
+  - type: reject
+podman_host_policy_transports:
+  docker: {}
+  docker-daemon:
+    "":
+      - type: reject
