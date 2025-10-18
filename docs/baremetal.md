@@ -7,6 +7,7 @@ Deploy services directly on bare-metal or virtual machines with idempotent confi
 - Packages installed via non-interactive APT (`DEBIAN_FRONTEND=noninteractive`).
 - Configuration files defined in the service contract render exactly once and trigger handlers when changed.
 - Generated units inherit defaults from `templates/baremetal.yml.j2`, keeping runtime-agnostic settings consistent.
+- `mounts.ephemeral_mounts` entries render `TemporaryFileSystem=` directives so only the declared paths stay writable at runtime.
 
 ## Prerequisites
 

@@ -8,6 +8,8 @@ Deploy services as LXC containers on Proxmox VE with predictable networking and 
 - LXC features derive exclusively from the service contract. Nested container flags such as `nesting=1,keyctl=1` appear only when you explicitly set `service_container.features`.
 - Ansible waits for SSH on `container_ip` (120 seconds) before running delegate tasks.
 - Package installation inside the container uses non-interactive APT and applies any rendered configuration or command hooks.
+- `mounts.ephemeral_mounts` entries render as systemd drop-ins (`TemporaryFileSystem=`) inside the guest so writable areas stay tmpfs backed.
+- A default `keyctl=0` feature is applied when you omit `service_container.features`, keeping the kernel keyring disabled unless explicitly required.
 
 ## Prerequisites
 
@@ -81,7 +83,8 @@ setup:
 
 - Explicit IP assignments keep host firewalls predictable.
 - Use Proxmox firewall rules or host-level filtering for exposed ports.
-- Keep `features` minimal; remove `nesting` when containerized workloads are not required.
+- Keep `features` minimal; remove `nesting` when containerized workloads are not required. The default `keyctl=0` hardens the guest; add `keyctl=1` only when necessary.
+- Declare tmpfs-backed paths through `mounts.ephemeral_mounts` so only those directories remain writable at runtime.
 - Prefer API tokens with only the `vms:read`/`vms:write` and `nodes:read` permissions the playbook needs. Bind them to the specific node or pool that hosts the managed LXCs instead of granting full-cluster rights.
 
 ## Troubleshooting

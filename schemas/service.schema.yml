@@ -5,7 +5,7 @@ required:
   - service_name
   - service_image
   - exports
-  - storage
+  - mounts
   - health
   - runtime_templates
 properties:
@@ -208,11 +208,46 @@ properties:
               type: string
             description:
               type: string
-  storage:
-    type: array
-    items:
-      type: object
-      required: [name, path]
+  mounts:
+    type: object
+    properties:
+      persistent_volumes:
+        type: array
+        items:
+          type: object
+          required: [name, path]
+          properties:
+            name:
+              type: string
+            path:
+              type: string
+            description:
+              type: string
+      ephemeral_mounts:
+        type: array
+        items:
+          type: object
+          required: [name, path]
+          properties:
+            name:
+              type: string
+            path:
+              type: string
+            apply_to:
+              type: array
+              items:
+                type: string
+                enum: [docker, podman, kubernetes, proxmox, baremetal]
+            medium:
+              type: string
+            size:
+              type: string
+            mode:
+              type: string
+            read_only:
+              type: boolean
+    required:
+      - persistent_volumes
   health:
     type: object
     required: [cmd]
@@ -259,6 +294,33 @@ properties:
               type: string
   runtime_templates:
     type: object
+  service_security:
+    type: object
+    properties:
+      user:
+        type: string
+      run_as_user:
+        oneOf:
+          - type: integer
+          - type: string
+      run_as_group:
+        oneOf:
+          - type: integer
+          - type: string
+      read_only_root_filesystem:
+        type: boolean
+      capabilities_drop:
+        type: array
+        items:
+          type: string
+      no_new_privileges:
+        type: boolean
+      allow_privilege_escalation:
+        type: boolean
+      capability_bounding_set:
+        type: array
+        items:
+          type: string
   kubernetes:
     type: object
     properties:

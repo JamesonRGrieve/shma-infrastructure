@@ -26,6 +26,7 @@ ansible-galaxy collection install kubernetes.core
 - `Secret` – named `<service_id>-env`, containing keys for every `secrets.env` entry.
 - `Secret` – named `<service_id>-files`, storing the rendered secret files.
 - `PersistentVolumeClaim` – sized from `service_storage_gb` or `service_storage_size`. Skipped automatically when `service_volumes.host_path` is provided.
+- `emptyDir` – emitted for each `mounts.ephemeral_mounts` entry that applies to Kubernetes, defaulting to `medium: Memory`.
 - `Deployment` – references the Secret for env vars, mounts secret files, and configures probes/resources.
 - `Service` – exposes declared `service_ports` within the cluster.
 
@@ -54,6 +55,9 @@ spec:
               readOnly: true
             - name: data
               mountPath: /etc/sample-service
+            - name: runtime-run
+              mountPath: /run/sample-service
+              readOnly: false
           livenessProbe:
             exec:
               command: ["/bin/sh", "-c", "exit 0"]
@@ -72,6 +76,10 @@ spec:
           hostPath:
             path: /srv/sample-service/config
             type: DirectoryOrCreate
+        - name: runtime-run
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
 ```
 
 ## Validation

@@ -1,4 +1,29 @@
 ---
+- name: Collect persistent volume paths
+  set_fact:
+    render_persistent_volume_paths: >-
+      {{ mounts.persistent_volumes | default([]) | map(attribute='path') | list }}
+  when: mounts is defined and mounts.persistent_volumes is defined
+
+- name: Collect ephemeral mount paths
+  set_fact:
+    render_ephemeral_mount_paths: >-
+      {{ mounts.ephemeral_mounts | default([]) | map(attribute='path') | list }}
+  when: mounts is defined and mounts.ephemeral_mounts is defined
+
+- name: Validate ephemeral mounts excluded from persistent backups
+  assert:
+    that:
+      - item not in render_persistent_volume_paths | default([])
+    fail_msg: >-
+      Ephemeral mount {{ item }} cannot be referenced by persistent volume backups.
+  loop: "{{ render_ephemeral_mount_paths | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  when:
+    - render_ephemeral_mount_paths is defined
+    - render_ephemeral_mount_paths | length > 0
+
 - name: Check if runtime is supported
   assert:
     that:

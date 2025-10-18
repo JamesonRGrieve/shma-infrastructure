@@ -52,10 +52,26 @@ def validate_examples(schema: dict, examples_dir: Path) -> int:
             failures.append(f"{example}: {exc.message}")
             continue
 
-        if (
-            document.get("needs_container_runtime") is not True
-            and document.get("service_container", {}).get("features")
-        ):
+        secrets = document.get("secrets", {})
+        placeholder_failures: list[str] = []
+        for secret in secrets.get("env", []) or []:
+            value = secret.get("value", "")
+            if isinstance(value, str) and value.lower().startswith("change-me-"):
+                placeholder_failures.append(secret.get("name", "<unnamed>"))
+        for secret in secrets.get("files", []) or []:
+            raw_value = secret.get("value") or secret.get("content") or ""
+            if isinstance(raw_value, str) and raw_value.lower().startswith(
+                "change-me-"
+            ):
+                placeholder_failures.append(secret.get("name", "<unnamed>"))
+        if placeholder_failures:
+            failures.append(
+                f"{example}: secrets {', '.join(sorted(placeholder_failures))} retain change-me-* placeholders"
+            )
+
+        if document.get("needs_container_runtime") is not True and document.get(
+            "service_container", {}
+        ).get("features"):
             failures.append(
                 "{}: service_container.features requires needs_container_runtime=true".format(
                     example

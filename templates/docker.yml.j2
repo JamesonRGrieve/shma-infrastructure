@@ -1,3 +1,26 @@
+{%- set mounts_config = mounts | default({}) %}
+{%- set ephemeral_mounts = mounts_config.ephemeral_mounts | default([]) %}
+{%- set default_apply_targets = ['docker', 'podman', 'kubernetes', 'proxmox', 'baremetal'] %}
+{%- set security = service_security | default({}) %}
+{%- set default_run_user = security.run_as_user if security.run_as_user is defined else 65532 %}
+{%- set default_run_group = security.run_as_group if security.run_as_group is defined else default_run_user %}
+{%- set compose_user_default = security.user if security.user is defined else ((default_run_user | string) ~ ':' ~ (default_run_group | string)) %}
+{%- set read_only_root = security.read_only_root_filesystem if security.read_only_root_filesystem is defined else true %}
+{%- set drop_caps_default = security.capabilities_drop | default(['ALL']) %}
+{%- if drop_caps_default is string %}{%- set drop_caps_default = [drop_caps_default] %}{%- endif %}
+{%- set no_new_privs = security.no_new_privileges if security.no_new_privileges is defined else true %}
+{%- set docker_tmpfs = namespace(items=[]) %}
+{%- for mount in ephemeral_mounts %}
+  {%- set apply_targets = mount.apply_to | default(default_apply_targets) %}
+  {%- if 'docker' in apply_targets %}
+    {%- set options = [] %}
+    {%- if mount.size is defined %}{%- set _ = options.append('size=' ~ mount.size) %}{%- endif %}
+    {%- if mount.mode is defined %}{%- set _ = options.append('mode=' ~ mount.mode) %}{%- endif %}
+    {%- set entry = mount.path %}
+    {%- if options %}{%- set entry = entry ~ ':' ~ options | join(',') %}{%- endif %}
+    {%- if entry not in docker_tmpfs.items %}{%- set _ = docker_tmpfs.items.append(entry) %}{%- endif %}
+  {%- endif %}
+{%- endfor %}
 {% set services_list = services | default([{
   'name': service_name | default(service_id),
   'container_name': service_name | default(service_id),
@@ -14,6 +37,30 @@ version: '3.8'
 
 services:
 {% for svc in services_list %}
+  {%- set svc_user = svc.user if svc.user is defined else compose_user_default %}
+  {%- set svc_read_only = svc.read_only if svc.read_only is defined else read_only_root %}
+  {%- set svc_cap_drop = svc.cap_drop if svc.cap_drop is defined else drop_caps_default %}
+  {%- if svc_cap_drop is string %}{%- set svc_cap_drop = [svc_cap_drop] %}{%- endif %}
+  {%- set svc_security_opt = namespace(items=[]) %}
+  {%- if svc.security_opt is defined and svc.security_opt %}
+    {%- for opt in svc.security_opt %}
+      {%- set _ = svc_security_opt.items.append(opt) %}
+    {%- endfor %}
+  {%- endif %}
+  {%- if no_new_privs %}
+    {%- if 'no-new-privileges:true' not in svc_security_opt.items %}
+      {%- set _ = svc_security_opt.items.append('no-new-privileges:true') %}
+    {%- endif %}
+  {%- endif %}
+  {%- set svc_tmpfs = namespace(items=[]) %}
+  {%- if svc.tmpfs is defined and svc.tmpfs %}
+    {%- for item in svc.tmpfs %}
+      {%- if item not in svc_tmpfs.items %}{%- set _ = svc_tmpfs.items.append(item) %}{%- endif %}
+    {%- endfor %}
+  {%- endif %}
+  {%- for entry in docker_tmpfs.items %}
+    {%- if entry not in svc_tmpfs.items %}{%- set _ = svc_tmpfs.items.append(entry) %}{%- endif %}
+  {%- endfor %}
   {{ svc.name }}:
     image: {{ svc.image }}
     container_name: {{ svc.container_name | default(svc.name) }}
@@ -27,8 +74,29 @@ services:
 {% if svc.domainname is defined %}
     domainname: {{ svc.domainname }}
 {% endif %}
-{% if svc.user is defined %}
-    user: {{ svc.user }}
+{% if svc_user is not none %}
+    user: {{ svc_user }}
+{% endif %}
+{% if svc_read_only is not none %}
+    read_only: {{ svc_read_only | ternary('true', 'false') }}
+{% endif %}
+{% if svc_cap_drop %}
+    cap_drop:
+{% for cap in svc_cap_drop %}
+      - {{ cap }}
+{% endfor %}
+{% endif %}
+{% if svc_security_opt.items %}
+    security_opt:
+{% for opt in svc_security_opt.items %}
+      - {{ opt }}
+{% endfor %}
+{% endif %}
+{% if svc_tmpfs.items %}
+    tmpfs:
+{% for entry in svc_tmpfs.items %}
+      - "{{ entry }}"
+{% endfor %}
 {% endif %}
 {% if svc.working_dir is defined %}
     working_dir: {{ svc.working_dir }}

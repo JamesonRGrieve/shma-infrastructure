@@ -4,6 +4,19 @@
 {% set file_list = service_files | default([]) %}
 {% set svc_list = service_services | default([]) %}
 {% set cmd_list = service_commands | default([]) %}
+{% set mounts_config = mounts | default({}) %}
+{% set ephemeral_mounts = mounts_config.ephemeral_mounts | default([]) %}
+{% set default_apply_targets = ['docker', 'podman', 'kubernetes', 'proxmox', 'baremetal'] %}
+{% set proxmox_tmpfs = namespace(items=[]) %}
+{% for mount in ephemeral_mounts %}
+  {% set apply_targets = mount.apply_to | default(default_apply_targets) %}
+  {% if 'proxmox' in apply_targets %}
+    {% set options = [] %}
+    {% if mount.mode is defined %}{% set _ = options.append('mode=' ~ mount.mode) %}{% endif %}
+    {% if mount.size is defined %}{% set _ = options.append('size=' ~ mount.size) %}{% endif %}
+    {% set _ = proxmox_tmpfs.items.append({'path': mount.path, 'options': options}) %}
+  {% endif %}
+{% endfor %}
 {% set pkg_names = namespace(items=[]) %}
 {% for pkg in pkg_list %}
   {% if pkg is string %}
@@ -31,6 +44,28 @@
     {% set feature_ns.value = '' %}
   {% endif %}
 {% endif %}
+{% set config_ns = namespace(items=[]) %}
+{% for item in file_list %}
+  {% set _ = config_ns.items.append(item) %}
+{% endfor %}
+{% set commands_ns = namespace(items=[]) %}
+{% for command in cmd_list %}
+  {% set _ = commands_ns.items.append(command) %}
+{% endfor %}
+{% if proxmox_tmpfs.items and (service_unit_name is defined or service_id is defined) %}
+  {% set unit_name = service_unit_name | default(service_id) %}
+  {% if unit_name %}
+    {% set tmpfs_dir = '/etc/systemd/system/' ~ unit_name ~ '.service.d' %}
+    {% set tmpfs_lines = [] %}
+    {% for mount in proxmox_tmpfs.items %}
+      {% set line = 'TemporaryFileSystem=' ~ mount.path %}
+      {% if mount.options %}{% set line = line ~ ':' ~ mount.options | join(',') %}{% endif %}
+      {% set _ = tmpfs_lines.append(line) %}
+    {% endfor %}
+    {% set tmpfs_content = '[Service]\n' ~ (tmpfs_lines | join('\n')) ~ '\n' %}
+    {% set _ = config_ns.items.append({'path': tmpfs_dir ~ '/tmpfs.conf', 'content': tmpfs_content, 'mode': '0644', 'dir_mode': '0750'}) %}
+  {% endif %}
+{% endif %}
 container_ip: "{{ service_ip }}"
 container:
   vmid: "{{ container.vmid | default(service_id) }}"
@@ -46,8 +81,10 @@ container:
   unprivileged: {{ container.unprivileged | default('yes') }}
 
 
-{% if feature_ns.value %}
+{% if feature_ns.value is not none %}
   features: "{{ feature_ns.value }}"
+{% else %}
+  features: "keyctl=0"
 {% endif %}
 
 setup:
@@ -55,8 +92,8 @@ setup:
 {% for pkg in pkg_list %}
     - {{ pkg }}
 {% endfor %}{% endif %}
-  config:{% if file_list | length == 0 %} []{% else %}
-{% for item in file_list %}
+  config:{% if config_ns.items | length == 0 %} []{% else %}
+{% for item in config_ns.items %}
     - path: {{ item.path }}
       content: |
 {{ item.content | indent(8, true) }}{% if item.mode is defined %}
@@ -68,7 +105,7 @@ setup:
       enabled: {{ svc.enabled | default(true) | ternary(true, false) }}
       state: {{ svc.state | default('started') }}
 {% endfor %}{% endif %}
-  commands:{% if cmd_list | length == 0 %} []{% else %}
-{% for cmd in cmd_list %}
+  commands:{% if commands_ns.items | length == 0 %} []{% else %}
+{% for cmd in commands_ns.items %}
     - {{ cmd }}
 {% endfor %}{% endif %}

@@ -38,7 +38,7 @@ The rendered manifest is written to `/tmp/ansible-runtime/<service_id>/<runtime>
 
 ## Service Contract Essentials
 
-Every service definition must provide identifiers, runtime templates, health checks, storage, and exports. A minimal example using the bundled `sample_service.yml` looks like:
+Every service definition must provide identifiers, runtime templates, health checks, mounts, and exports. A minimal example using the bundled `sample_service.yml` looks like:
 
 ```yaml
 service_id: sample-service
@@ -54,6 +54,16 @@ service_volumes:
     host_path: /srv/sample-service/config
     host_path_type: DirectoryOrCreate
     target: /etc/sample-service
+
+mounts:
+  persistent_volumes:
+    - name: config
+      path: /etc/sample-service
+  ephemeral_mounts:
+    - name: runtime-run
+      path: /run/sample-service
+      apply_to: [docker, podman, kubernetes, proxmox, baremetal]
+      medium: Memory
 
 exports:
   env:
@@ -99,7 +109,10 @@ The registry keeps validation decoupled from the Ansible inventory while ensurin
 - `quadlet_scope` – set to `system` (default) or `user` to control where Quadlet units are installed. When using `quadlet_scope: user`, make sure lingering is enabled for the target user or user services are explicitly started at boot.
 - `quadlet_auto_update` – defaults to `none` so Quadlet units do not pull image updates behind your back. Promote new digests intentionally or override per-service when a signed registry orchestrates rollouts.
 - `service_volumes.host_path` – bind-mounts host directories into containers across Compose, Quadlet, and Kubernetes. Pair with `host_path_type` (default `DirectoryOrCreate`) to choose the Kubernetes `hostPath` strategy.
+- `mounts.persistent_volumes` – declare directories that persist across restarts and inform backup tooling.
+- `mounts.ephemeral_mounts` – enumerate tmpfs-backed paths for each runtime so only the declared directories remain writable.
 - `secrets.shred_after_apply` – defaults to `true` so rendered secret files and env files are shredded once adapters finish. Override with `false` only when persistent copies are required.
+- `service_security` – tune the default non-root, read-only container posture when a workload needs additional capabilities.
 - `hardening_enable_cockpit` – opt-in toggle that installs Cockpit, binds it to `hardening_cockpit_listen_address` (defaults to `127.0.0.1`), and optionally opens UFW 9090 to the addresses listed in `hardening_cockpit_allowed_sources`.
 - `hardening_cockpit_passwordless_sudo` – defaults to `false`. Enable only if Cockpit must issue privileged commands without prompting.
 - `hardening_enable_ipv6` – defaults to `true`, keeping dual-stack networks intact. Disable only when upstream networking prohibits IPv6 entirely.

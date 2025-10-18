@@ -21,20 +21,27 @@ service_namespace: pvc
 service_replicas: 1
 service_storage_gb: 20
 runtime_templates:
-  proxmox: templates/proxmox.yml.j2
-  docker: templates/docker.yml.j2
-  podman: templates/podman.yml.j2
-  kubernetes: templates/kubernetes.yml.j2
-  baremetal: templates/baremetal.yml.j2
+  proxmox: ../templates/proxmox.yml.j2
+  docker: ../templates/docker.yml.j2
+  podman: ../templates/podman.yml.j2
+  kubernetes: ../templates/kubernetes.yml.j2
+  baremetal: ../templates/baremetal.yml.j2
 exports:
   env:
     - name: PVC_URL
       value: postgres://pvc.local:5432/app
-storage:
-  - name: pgdata
-    path: /var/lib/pvc
-  - name: backups
-    path: /var/backups/pvc
+mounts:
+  persistent_volumes:
+    - name: pgdata
+      path: /var/lib/pvc
+    - name: backups
+      path: /var/backups/pvc
+  ephemeral_mounts:
+    - name: runtime-run
+      path: /run/pvc
+      apply_to: [docker, podman, kubernetes, proxmox, baremetal]
+      medium: Memory
+      size: 128Mi
 health:
   cmd:
     - /bin/sh
