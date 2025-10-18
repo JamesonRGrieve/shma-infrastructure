@@ -33,8 +33,6 @@
 {% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] %}
 {% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
 {% set env_file_name = (service_name | default(service_id)) + '.env' %}
-version: '3.8'
-
 services:
 {% for svc in services_list %}
   {%- set svc_user = svc.user if svc.user is defined else compose_user_default %}

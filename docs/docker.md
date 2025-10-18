@@ -30,8 +30,6 @@ docker compose version
 `templates/docker.yml.j2` renders a service similar to the bundled sample:
 
 ```yaml
-version: '3.8'
-
 services:
   sample-service:
     image: docker.io/library/nginx@sha256:2ed85f18cb2c6b49e191bcb6bf12c0c07d63f3937a05d9f5234170d4f8df5c94
