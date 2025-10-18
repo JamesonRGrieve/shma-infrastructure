@@ -9,6 +9,7 @@
 {%- set drop_caps_default = security.capabilities_drop | default(['ALL']) %}
 {%- if drop_caps_default is string %}{%- set drop_caps_default = [drop_caps_default] %}{%- endif %}
 {%- set no_new_privs = security.no_new_privileges if security.no_new_privileges is defined else true %}
+{%- set default_apparmor = security.apparmor_profile if security.apparmor_profile is defined else 'docker-default' %}
 {%- set docker_tmpfs = namespace(items=[]) %}
 {%- for mount in ephemeral_mounts %}
   {%- set apply_targets = mount.apply_to | default(default_apply_targets) %}
@@ -51,6 +52,19 @@ services:
   {%- if no_new_privs %}
     {%- if 'no-new-privileges:true' not in svc_security_opt.items %}
       {%- set _ = svc_security_opt.items.append('no-new-privileges:true') %}
+    {%- endif %}
+  {%- endif %}
+  {%- set has_apparmor = false %}
+  {%- for opt in svc_security_opt.items %}
+    {%- if opt is string and opt.startswith('apparmor=') %}
+      {%- set has_apparmor = true %}
+    {%- endif %}
+  {%- endfor %}
+  {%- set svc_apparmor = svc.apparmor_profile if svc.apparmor_profile is defined else default_apparmor %}
+  {%- if svc_apparmor is not none and (svc_apparmor | string) | length > 0 %}
+    {%- set apparmor_opt = 'apparmor=' ~ svc_apparmor %}
+    {%- if not has_apparmor and apparmor_opt not in svc_security_opt.items %}
+      {%- set _ = svc_security_opt.items.append(apparmor_opt) %}
     {%- endif %}
   {%- endif %}
   {%- set svc_tmpfs = namespace(items=[]) %}

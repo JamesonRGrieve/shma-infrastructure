@@ -10,7 +10,7 @@ Deploy services using Docker Compose with secret-aware environment files and Com
 - Health probes come directly from `health.cmd` ensuring parity with other runtimes.
 - Host bind mounts are first-class: specify `service_volumes.host_path` to keep container filesystems disposable while state persists on the host.
 - Ephemeral tmpfs mounts defined under `mounts.ephemeral_mounts` render via Compose `tmpfs` entries so only declared paths remain writable.
-- Containers default to running as UID/GID `65532`, drop all capabilities, run as read-only, and set `no-new-privileges`. Override with `service_security` when a workload needs explicit grants.
+- Containers default to running as UID/GID `65532`, drop all capabilities, run as read-only, enforce `no-new-privileges`, and attach the Docker `apparmor=docker-default` profile. Override with `service_security` when a workload needs explicit grants or to supply a different AppArmor profile.
 
 ## Prerequisites
 
@@ -41,6 +41,7 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+      - apparmor=docker-default
     env_file:
       - ./sample-service.env
     environment:

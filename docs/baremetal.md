@@ -8,6 +8,7 @@ Deploy services directly on bare-metal or virtual machines with idempotent confi
 - Configuration files defined in the service contract render exactly once and trigger handlers when changed.
 - Generated units inherit defaults from `templates/baremetal.yml.j2`, keeping runtime-agnostic settings consistent.
 - `mounts.ephemeral_mounts` entries render `TemporaryFileSystem=` directives so only the declared paths stay writable at runtime.
+- systemd units enable `PrivateTmp=yes`, `ProtectSystem=strict`, and `ProtectHome=yes` by default (unless overridden via `service_security`) to harden the host.
 
 ## Prerequisites
 
