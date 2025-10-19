@@ -8,14 +8,15 @@ from typing import List
 
 import yaml
 
+from filter_plugins.health import get_health_command
+
 
 def load_health_command(service_file: Path) -> List[str]:
     document = yaml.safe_load(service_file.read_text())
-    health = document.get("health") or {}
-    command = health.get("cmd") or ["true"]
-    if not isinstance(command, list):
-        raise SystemExit("health.cmd must be an array of command arguments")
-    return [str(arg) for arg in command]
+    try:
+        return get_health_command(document.get("health"))
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 def ensure_health(namespace: str, app_name: str, command: List[str]) -> None:
