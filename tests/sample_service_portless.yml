@@ -1,0 +1,29 @@
+service_id: portless-service
+service_name: portless-service
+service_image: docker.io/library/busybox@sha256:1d6cb4dd3bfa4f7c517d68d548406d82b88144fef0a2b7ad9c7e2e5e6a1b2c3d
+service_env: []
+service_volumes: []
+service_ip: 192.0.2.80
+service_namespace: sandbox
+service_replicas: 1
+service_storage_gb: 1
+service_resources:
+  memory_mb: 128
+  cpu_cores: 0.5
+runtime_templates:
+  kubernetes: ../templates/kubernetes.yml.j2
+mounts:
+  persistent_volumes:
+    - name: data
+      path: /var/lib/portless
+  ephemeral_mounts:
+    - name: cache-readonly
+      path: /var/run/cache
+      apply_to: [kubernetes]
+      read_only: true
+health:
+  cmd:
+    - /bin/sh
+    - -c
+    - "exit 0"
+needs_container_runtime: false

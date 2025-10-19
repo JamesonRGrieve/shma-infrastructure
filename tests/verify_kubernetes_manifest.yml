@@ -38,6 +38,8 @@
         env_secret_resources: "{{ kubernetes_resources | selectattr('kind', '==', 'Secret') | selectattr('metadata.name', '==', deployment_name ~ '-env') | list }}"
         file_secret_resources: "{{ kubernetes_resources | selectattr('kind', '==', 'Secret') | selectattr('metadata.name', '==', deployment_name ~ '-files') | list }}"
         pvc_resources: "{{ kubernetes_resources | selectattr('kind', '==', 'PersistentVolumeClaim') | list }}"
+        service_resource_docs: "{{ kubernetes_resources | selectattr('kind', '==', 'Service') | selectattr('metadata.name', '==', deployment_name) | list }}"
+        network_policy_resources: "{{ kubernetes_resources | selectattr('kind', '==', 'NetworkPolicy') | selectattr('metadata.name', '==', deployment_name) | list }}"
 
     - name: Validate environment secret layout
       ansible.builtin.assert:
@@ -68,6 +70,28 @@
         that:
           - deployment_resources | length == 1
         fail_msg: "Expected a single Deployment resource in the manifest."
+
+    - name: Validate service exposure
+      ansible.builtin.assert:
+        that:
+          - service_resource_docs | length == 1
+          - (service_resource_docs | length == 1) and (service_resource_docs[0].spec.ports | length == 1)
+          - (service_resource_docs | length == 1) and (service_resource_docs[0].spec.ports[0].targetPort == service_ports[0].target)
+          - (service_resource_docs | length == 1) and (service_resource_docs[0].spec.ports[0].port == (service_ports[0].published | default(service_ports[0].target)))
+        fail_msg: "Service resource must expose the declared port mapping."
+
+    - name: Validate network policy defaults
+      ansible.builtin.assert:
+        that:
+          - network_policy_resources | length == 1
+          - (network_policy_resources | length == 1) and (network_policy_resources[0].spec.policyTypes | select('equalto', 'Ingress') | list | length == 1)
+          - (network_policy_resources | length == 1) and (network_policy_resources[0].spec.policyTypes | select('equalto', 'Egress') | list | length == 1)
+          - (network_policy_resources | length == 1) and (network_policy_resources[0].spec.ingress | length == 1)
+          - (network_policy_resources | length == 1) and (network_policy_resources[0].spec.ingress[0].ports[0].port == (service_ports[0].published | default(service_ports[0].target)))
+          - (network_policy_resources | length == 1) and (network_policy_resources[0].spec.ingress[0].from[0].namespaceSelector.matchLabels['kubernetes.io/metadata.name'] == service_namespace)
+          - (network_policy_resources | length == 1) and (network_policy_resources[0].spec.egress | length == 1)
+          - (network_policy_resources | length == 1) and (network_policy_resources[0].spec.egress[0] == {})
+        fail_msg: "NetworkPolicy must default to namespace-scoped ingress and unrestricted egress."
 
     - name: Extract deployment details
       ansible.builtin.set_fact:

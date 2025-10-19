@@ -338,6 +338,19 @@ properties:
         type: boolean
       allow_privilege_escalation:
         type: boolean
+      network_policy:
+        type: object
+        properties:
+          enabled:
+            type: boolean
+          policy_types:
+            type: array
+            items:
+              type: string
+          ingress:
+            type: array
+          egress:
+            type: array
       capability_bounding_set:
         type: array
         items:

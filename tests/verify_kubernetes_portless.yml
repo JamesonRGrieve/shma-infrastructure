@@ -1,0 +1,69 @@
+---
+- name: Validate portless Kubernetes manifest omits Services
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  vars:
+    runtime: kubernetes
+  tasks:
+    - name: Load portless service definition
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/sample_service_portless.yml"
+
+    - name: Render Kubernetes runtime
+      ansible.builtin.include_role:
+        name: roles/common/render_runtime
+
+    - name: Read rendered manifest
+      ansible.builtin.slurp:
+        src: "{{ runtime_config_path }}"
+      register: rendered_manifest
+
+    - name: Parse manifest documents
+      ansible.builtin.set_fact:
+        manifest_documents: "{{ rendered_manifest.content | b64decode | from_yaml_all | list }}"
+
+    - name: Filter Kubernetes resources
+      ansible.builtin.set_fact:
+        kubernetes_resources: "{{ manifest_documents | reject('equalto', None) | list }}"
+
+    - name: Determine resource name
+      ansible.builtin.set_fact:
+        deployment_name: "{{ service_name | default(service_id) }}"
+
+    - name: Collect Kubernetes resources by kind
+      ansible.builtin.set_fact:
+        deployment_resources: "{{ kubernetes_resources | selectattr('kind', '==', 'Deployment') | selectattr('metadata.name', '==', deployment_name) | list }}"
+        service_resource_docs: "{{ kubernetes_resources | selectattr('kind', '==', 'Service') | list }}"
+        network_policy_resources: "{{ kubernetes_resources | selectattr('kind', '==', 'NetworkPolicy') | list }}"
+
+    - name: Ensure deployment rendered
+      ansible.builtin.assert:
+        that:
+          - deployment_resources | length == 1
+        fail_msg: "Expected a Deployment resource for the portless service."
+
+    - name: Extract pod details
+      ansible.builtin.set_fact:
+        primary_container: "{{ deployment_resources[0].spec.template.spec.containers[0] }}"
+        pod_volumes: "{{ deployment_resources[0].spec.template.spec.volumes | default([]) }}"
+
+    - name: Validate absence of Service and NetworkPolicy
+      ansible.builtin.assert:
+        that:
+          - service_resource_docs | length == 0
+          - network_policy_resources | length == 0
+        fail_msg: "Portless services must not render Service or NetworkPolicy resources."
+
+    - name: Confirm container omits ports
+      ansible.builtin.assert:
+        that:
+          - primary_container.ports is undefined
+        fail_msg: "Containers without declared ports must not receive a default containerPort."
+
+    - name: Confirm read-only ephemeral mount skipped
+      ansible.builtin.assert:
+        that:
+          - pod_volumes | selectattr('name', '==', 'cache-readonly') | list | length == 0
+          - primary_container.volumeMounts | default([]) | selectattr('name', '==', 'cache-readonly') | list | length == 0
+        fail_msg: "Read-only ephemeral mounts must not create emptyDir volumes."

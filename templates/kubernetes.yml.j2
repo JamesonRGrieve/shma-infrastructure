@@ -1,4 +1,19 @@
 #jinja2: lstrip_blocks: True, trim_blocks: True
+{% macro render_secret(secret_name, namespace, entries) -%}
+{% if entries %}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ secret_name }}
+  namespace: {{ namespace }}
+type: Opaque
+stringData:
+{% for key, value in entries.items() %}
+  {{ key }}: {{ value | to_json }}
+{% endfor %}
+{% endif %}
+{%- endmacro %}
 {% set svc_name = service_name | default(service_id) %}
 {% set svc_namespace = service_namespace | default('default') %}
 {% set mounts_config = mounts | default({}) %}
@@ -12,10 +27,28 @@
 {% if drop_caps_default is string %}{% set drop_caps_default = [drop_caps_default] %}{% endif %}
 {% set no_new_privs = security.no_new_privileges if security.no_new_privileges is defined else true %}
 {% set allow_priv_escalation = security.allow_privilege_escalation if security.allow_privilege_escalation is defined else (not no_new_privs) %}
-{% set ingress_spec = ingress | default({}) %}
-{% set ingress_routes = ingress_spec.routes | default([]) %}
-{% set ingress_flag = ingress_spec.get('enabled') if ingress_spec is mapping else none %}
-{% set ingress_enabled = (ingress_flag if ingress_flag is not none else (ingress_routes | length > 0)) %}
+{% set ports = service_ports | default([]) %}
+{% set container_port = ports[0].target if ports | length > 0 else none %}
+{% set service_port_value = ports[0].published if ports | length > 0 and ports[0].published is defined else container_port %}
+{% set ingress_raw = ingress | default({}) %}
+{% if ingress_raw is mapping %}
+  {% set ingress_flag = ingress_raw.get('enabled') %}
+  {% set ingress_source_routes = ingress_raw.get('routes', []) %}
+{% else %}
+  {% set ingress_flag = none %}
+  {% set ingress_source_routes = [] %}
+{% endif %}
+{% set ingress_ns = namespace(items=[]) %}
+{% for route in ingress_source_routes if route is mapping %}
+  {% set host = route.host if route.host is defined else none %}
+  {% set path_prefix = route.path_prefix if route.path_prefix is defined else '/' %}
+  {% if host %}
+    {% set sanitized_route = route | combine({'path_prefix': path_prefix}) %}
+    {% set _ = ingress_ns.items.append(sanitized_route) %}
+  {% endif %}
+{% endfor %}
+{% set ingress_routes = ingress_ns.items %}
+{% set ingress_enabled = ((ingress_flag if ingress_flag is not none else (ingress_routes | length > 0)) and container_port is not none) %}
 {% set k8s_ephemeral = namespace(items=[]) %}
 {% for mount in ephemeral_mounts %}
   {% set apply_targets = mount.apply_to | default(default_apply_targets) %}
@@ -28,7 +61,9 @@
       'size': mount.size if mount.size is defined else None,
       'read_only': mount.read_only if mount.read_only is defined else false
     } %}
-    {% set _ = k8s_ephemeral.items.append(entry) %}
+    {% if not entry.read_only %}
+      {% set _ = k8s_ephemeral.items.append(entry) %}
+    {% endif %}
   {% endif %}
 {% endfor %}
 {% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] %}
@@ -42,9 +77,6 @@
 {% set health_timeout_seconds = (health.timeout | default('5s')) | regex_replace('s$', '') | int %}
 {% set health_retries = health.retries | default(3) %}
 {% set replicas = service_replicas | default(1) %}
-{% set ports = service_ports | default([]) %}
-{% set container_port = ports[0].target if ports | length > 0 else 8080 %}
-{% set service_port_value = ports[0].published if ports | length > 0 and ports[0].published is defined else container_port %}
 {% set resources = service_resources | default({'memory_mb': 256, 'cpu_cores': 1}) %}
 {% set memory_request = resources.memory_mb | default(256) %}
 {% set cpu_cores = resources.cpu_cores | default(1) %}
@@ -63,32 +95,17 @@
 {% set storage_size = '1Gi' %}
 {% endif %}
 {% set volume_mount_path = volume_config.target if volume_config is mapping and volume_config.target is defined else '/data' %}
-{%- if secret_env -%}
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: {{ env_secret_name }}
-  namespace: {{ svc_namespace }}
-type: Opaque
-stringData:
+{% set env_secret_entries = namespace(items={}) %}
 {% for item in secret_env %}
-  {{ item.name }}: {{ item.value | to_json }}
+  {% set env_secret_entries.items = env_secret_entries.items | combine({item.name: item.value}) %}
 {% endfor %}
-{% endif -%}
-{%- if file_secrets -%}
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: {{ file_secret_name }}
-  namespace: {{ svc_namespace }}
-type: Opaque
-stringData:
+{% set file_secret_entries = namespace(items={}) %}
 {% for secret in file_secrets %}
-  {{ secret.name }}: {{ (secret.value | default(secret.content) | default('', true)) | to_json }}
+  {% set secret_value = secret.value | default(secret.content) | default('', true) %}
+  {% set file_secret_entries.items = file_secret_entries.items | combine({secret.name: secret_value}) %}
 {% endfor %}
-{% endif -%}
+{{ render_secret(env_secret_name, svc_namespace, env_secret_entries.items) }}
+{{ render_secret(file_secret_name, svc_namespace, file_secret_entries.items) }}
 {%- if not use_host_path -%}
 ---
 apiVersion: v1
@@ -168,8 +185,10 @@ spec:
 {% endfor %}
 {% endif %}
 {% endif %}
+{% if container_port is not none %}
           ports:
             - containerPort: {{ container_port }}
+{% endif %}
           volumeMounts:
             - name: data
               mountPath: {{ volume_mount_path }}
@@ -242,6 +261,7 @@ spec:
                 path: {{ secret.name }}
 {% endfor %}
 {% endif %}
+{% if container_port is not none %}
 ---
 apiVersion: v1
 kind: Service
@@ -295,5 +315,63 @@ spec:
         - {{ host }}
 {% endfor %}
 {% endfor %}
+{% endif %}
+{% endif %}
+{% endif %}
+{% set network_policy_spec = security.network_policy if security.network_policy is defined and security.network_policy is mapping else {} %}
+{% set network_policy_enabled_flag = network_policy_spec.get('enabled') if network_policy_spec else none %}
+{% set policy_types_candidate = network_policy_spec.policy_types if network_policy_spec.policy_types is defined and network_policy_spec.policy_types is iterable and network_policy_spec.policy_types is not string else [] %}
+{% set policy_types = policy_types_candidate | list if policy_types_candidate else [] %}
+{% if not policy_types %}
+  {% if container_port is not none %}
+    {% set policy_types = ['Ingress', 'Egress'] %}
+  {% else %}
+    {% set policy_types = ['Egress'] %}
+  {% endif %}
+{% endif %}
+{% set policy_types = policy_types | unique %}
+{% set ingress_candidate = network_policy_spec.ingress if network_policy_spec.ingress is defined and network_policy_spec.ingress is iterable and network_policy_spec.ingress is not string else [] %}
+{% set egress_candidate = network_policy_spec.egress if network_policy_spec.egress is defined and network_policy_spec.egress is iterable and network_policy_spec.egress is not string else [] %}
+{% if 'Ingress' in policy_types %}
+  {% set ingress_rules = ingress_candidate | list %}
+  {% if not ingress_rules and container_port is not none %}
+    {% set default_from = [{'namespaceSelector': {'matchLabels': {'kubernetes.io/metadata.name': svc_namespace}}}] %}
+    {% set default_ports = [{'port': service_port_value, 'protocol': 'TCP'}] %}
+    {% set ingress_rules = [{'from': default_from, 'ports': default_ports}] %}
+  {% endif %}
+{% else %}
+  {% set ingress_rules = [] %}
+{% endif %}
+{% if 'Egress' in policy_types %}
+  {% set egress_rules = egress_candidate | list %}
+  {% if not egress_rules %}
+    {% set egress_rules = [{}] %}
+  {% endif %}
+{% else %}
+  {% set egress_rules = [] %}
+{% endif %}
+{% set network_policy_enabled = (network_policy_enabled_flag if network_policy_enabled_flag is not none else (container_port is not none)) and policy_types %}
+{% if network_policy_enabled %}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ svc_name }}
+  namespace: {{ svc_namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ svc_name }}
+  policyTypes:
+{% for policy_type in policy_types %}
+    - {{ policy_type }}
+{% endfor %}
+{% if ingress_rules %}
+  ingress:
+{{ ingress_rules | to_nice_yaml(indent=2) | indent(4, True) | regex_replace('(-)\\s+', '\\1 ') }}
+{% endif %}
+{% if egress_rules %}
+  egress:
+{{ egress_rules | to_nice_yaml(indent=2) | indent(4, True) | regex_replace('(-)\\s+', '\\1 ') }}
 {% endif %}
 {% endif %}
