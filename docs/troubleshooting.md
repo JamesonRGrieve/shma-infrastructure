@@ -8,13 +8,13 @@ symptoms, commands to confirm the root cause, and remediation guidance.
 **Symptoms**
 - `ci/validate_schema.py` or `edge_ingress` tasks report missing secret keys.
 - `ansible-playbook` aborts with `Undefined variable` when templating
-  `secrets.env` or `secrets.files` entries.
+  `secrets.items` entries.
 
 **Debugging steps**
 - Run `ansible-playbook tests/render.yml -e service_definition_file=<file>` to
   reproduce the render locally with verbose output.
-- Inspect `secrets.env` and `secrets.files` arrays; confirm every item contains a
-  `name` and `value` (and `target` for file entries).
+- Inspect `secrets.items`; confirm each entry contains a `name` and either a
+  `value` (`type: env`) or `content`/`target` (`type: file`).
 - Verify inventory group_vars define each templated secret or that the CI
   environment injects them via `ANSIBLE_VAULT_PASSWORD_FILE`.
 
@@ -85,3 +85,27 @@ symptoms, commands to confirm the root cause, and remediation guidance.
 
 Documenting the investigation keeps on-call engineers aligned across runtimes.
 Pair this guide with the backup strategy to build a full remediation playbook.
+
+## Python dependency installation failures
+
+**Symptoms**
+- `pytest` exits early with `ModuleNotFoundError: No module named 'jsonschema'`.
+- `pip install -r requirements.txt` retries repeatedly before ending with
+  `403 Forbidden` errors from the proxy.
+
+**Debugging steps**
+- Verify whether the environment can reach `https://pypi.org/simple/` without a
+  corporate proxy in the middle. The CI runners expect direct HTTPS access.
+- Inspect `/etc/pip.conf` or the `PIP_*` environment variables for forced proxy
+  settings that block outbound requests.
+- If the network must traverse a proxy, confirm the proxy trusts outbound TLS
+  by testing a manual download (`curl https://pypi.org/simple/jsonschema/`).
+
+**Fix**
+- Preinstall `jsonschema` (and the rest of `requirements.txt`) inside the
+  execution environment before invoking the tests.
+- When a proxy cannot be avoided, configure an allow-list for `pypi.org` and
+  `files.pythonhosted.org` so pip can negotiate TLS tunnels without
+  interception.
+- For completely air-gapped environments, mirror the Python packages internally
+  and point `pip` to the mirror via `--index-url`.

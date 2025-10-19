@@ -128,6 +128,11 @@
     - secrets.shred_after_apply is defined
     - not (secrets.shred_after_apply | bool)
 
+- name: Normalize secrets for validation
+  set_fact:
+    validation_secret_context: "{{ secrets | default({}) | normalize_secrets }}"
+  when: secrets is defined
+
 - name: Validate secret environment values are not placeholders
   assert:
     that:
@@ -135,22 +140,37 @@
     fail_msg: >-
       Secret {{ item.name | default('<unnamed>') }} retains placeholder value
       "change-me". Provide a real secret before applying.
-  loop: "{{ secrets.env | default([]) }}"
+  loop: "{{ validation_secret_context.env | default([]) }}"
   loop_control:
     label: "{{ item.name | default('<unnamed>') }}"
-  when: secrets is defined and secrets.env is defined and secrets.env | length > 0
+  when:
+    - validation_secret_context is defined
+    - validation_secret_context.env | length > 0
 
 - name: Validate secret file contents are not placeholders
   assert:
     that:
-      - not ((item.value | default(item.content | default(''))) | lower).startswith('change-me')
+      - not ((item.content | default('')) | lower).startswith('change-me')
     fail_msg: >-
       Secret file {{ item.name | default('<unnamed>') }} retains placeholder value
       "change-me". Replace it with the real secret payload.
-  loop: "{{ secrets.files | default([]) }}"
+  loop: "{{ validation_secret_context.files | default([]) }}"
   loop_control:
     label: "{{ item.name | default('<unnamed>') }}"
-  when: secrets is defined and secrets.files is defined and secrets.files | length > 0
+  when:
+    - validation_secret_context is defined
+    - validation_secret_context.files | length > 0
+
+- name: Validate ingress routes exist when explicitly enabled
+  fail:
+    msg: >-
+      ingress.enabled is true but no ingress.routes entries were provided. Define
+      at least one route or disable ingress for service {{ service_id | default('unknown') }}.
+  when:
+    - ingress is defined
+    - ingress is mapping
+    - (ingress.enabled | default(false)) | bool
+    - (ingress.routes | default([])) | length == 0
 
 - name: Validate ingress route keys are allowed
   assert:
@@ -234,6 +254,24 @@
     - ingress.routes | length > 0
     - item.tls is defined
     - item.tls.acme is defined
+
+- name: Validate Kubernetes ephemeral mounts are writable
+  vars:
+    read_only_ephemeral: >-
+      {{
+        (mounts.ephemeral_mounts | default([]))
+        | selectattr('read_only', 'defined')
+        | selectattr('read_only', 'equalto', true)
+        | list
+      }}
+  fail:
+    msg: >-
+      Kubernetes runtime does not support read_only ephemeral_mounts. Remove the
+      read_only flag from: {{ read_only_ephemeral | map(attribute='name') | join(', ') }}.
+  when:
+    - runtime_templates is defined
+    - runtime_templates.kubernetes is defined
+    - read_only_ephemeral | length > 0
 
 - name: Validate ingress headers keys are allowed
   assert:

@@ -69,13 +69,11 @@ mounts:
   ephemeral_mounts:
     - name: runtime-run
       path: /run/sample-service
-      apply_to: [docker, podman, kubernetes, proxmox, baremetal]
       medium: Memory
       size: 64Mi
       mode: '0755'
     - name: runtime-tmp
       path: /tmp/sample-service
-      apply_to: [docker, podman]
       size: 64Mi
 health:
   cmd:
@@ -94,12 +92,13 @@ runtime_templates:
 secrets:
   shred_after_apply: true
   rotation_timestamp: "2024-08-20T12:34:56Z"
-  env:
+  items:
     - name: SAMPLE_SERVICE_TOKEN
+      type: env
       value: super-secret-token
-  files:
     - name: tls-cert
-      value: |
+      type: file
+      content: |
         -----BEGIN CERTIFICATE-----
         MIIDdzCCAl+gAwIBAgIEbPOjhzANBgkqhkiG9w0BAQsFADBvMQswCQYDVQQGEwJVUzEQ
         MA4GA1UECBMHQXJpem9uYTEPMA0GA1UEBxMGVG9ycmVzMRQwEgYDVQQKEwtFeGFtcGxl

@@ -68,13 +68,11 @@ mounts:
   ephemeral_mounts:
     - name: runtime-run
       path: /run/sample-service
-      apply_to: [docker, podman, kubernetes, proxmox, baremetal]
       medium: Memory
       size: 64Mi
       mode: '0755'
     - name: runtime-tmp
       path: /tmp/sample-service
-      apply_to: [docker, podman]
       size: 64Mi
 health:
   cmd:
@@ -92,11 +90,12 @@ runtime_templates:
   baremetal: ../templates/baremetal.yml.j2
 secrets:
   shred_after_apply: true
-  env:
+  items:
     - name: SAMPLE_SERVICE_TOKEN
+      type: env
       value: super-secret-token
-  files:
     - name: tls-cert
-      value: "-----BEGIN CERTIFICATE-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtestcertificate\n-----END CERTIFICATE-----"
+      type: file
+      content: "-----BEGIN CERTIFICATE-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtestcertificate\n-----END CERTIFICATE-----"
       target: /etc/sample-service/certs/tls.crt
       mode: '0400'

@@ -2,8 +2,6 @@
 
 A runtime-agnostic infrastructure-as-code framework for deploying self-hosted applications across **Proxmox LXC**, **Docker Compose**, **Podman Quadlets**, **Kubernetes**, and **bare-metal systemd** from a single service contract.
 
-> **Heads-up:** Earlier drafts referenced an "Advanced Research mode". That experiment has been retired—everything documented here reflects the only supported workflow.
-
 ## Key Features
 
 - **Write Once, Deploy Anywhere** – render the same service definition into runtime-specific manifests and unit files.
@@ -81,7 +79,6 @@ mounts:
   ephemeral_mounts:
     - name: runtime-run
       path: /run/sample-service
-      apply_to: [docker, podman, kubernetes, proxmox, baremetal]
       medium: Memory
 
 exports:
@@ -92,13 +89,14 @@ exports:
 
 secrets:
   shred_after_apply: true
-  env:
+  items:
     - name: SAMPLE_SERVICE_TOKEN
+      type: env
       value: "{{ sample_service_token }}"
-  files:
     - name: tls-cert
+      type: file
       target: /etc/sample-service/certs/tls.crt
-      value: "{{ sample_service_tls_cert }}"
+      content: "{{ sample_service_tls_cert }}"
 ```
 
 > **Note:** Always declare host mounts with `service_volumes` (plural). The legacy `service_volume` key has been removed from the framework; migrate older inventories to the plural form before running validation to avoid schema failures.

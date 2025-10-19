@@ -28,73 +28,26 @@
     quadlet_env_path: "{{ ((quadlet_effective_scope == 'user') | ternary(quadlet_user_home + '/.config/containers/systemd', '/etc/containers/systemd')) + '/' + (service_name | default(service_id)) + '.env' }}"
     quadlet_secret_dir: "{{ ((quadlet_effective_scope == 'user') | ternary(quadlet_user_home + '/.config/containers/systemd/secrets', '/etc/containers/systemd/secrets')) }}"
 
-- name: Resolve Quadlet secrets
-  set_fact:
-    quadlet_secret_env: "{{ secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] }}"
-    quadlet_secret_files: "{{ secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] }}"
-    quadlet_secret_shred: "{{ secrets.shred_after_apply if secrets is defined else true }}"
+- name: Prepare Quadlet secrets
+  include_tasks: prepare_secrets.yml
+  vars:
+    runtime_secret_env_path: "{{ quadlet_env_path }}"
+    runtime_secret_dir: "{{ quadlet_secret_dir }}"
+    runtime_secret_write_env_file: true
+    runtime_secret_become: {{ (quadlet_effective_scope == 'system') | bool }}
+    runtime_secret_cleanup_entry_extra:
+      become: {{ (quadlet_effective_scope == 'system') | bool }}
 
-- name: Deduplicate quadlet secret environment variables
+- name: Derive Quadlet secret helpers
   set_fact:
-    quadlet_secret_env: >-
-      {{ quadlet_secret_env | reverse | unique(attribute='name') | reverse }}
-  when: quadlet_secret_env | length > 0
-
-- name: Register Podman secret shredding handler
-  set_fact:
-    runtime_secret_cleanup_contexts: >-
-      {{
-        (runtime_secret_cleanup_contexts | default([]))
-        + [
-          {
-            'env_path': quadlet_env_path,
-            'env': quadlet_secret_env,
-            'files': quadlet_secret_files,
-            'directory': quadlet_secret_dir,
-            'shred': quadlet_secret_shred,
-            'become': (quadlet_effective_scope == 'system') | bool,
-          }
-        ]
-      }}
-  when: quadlet_secret_env | length > 0 or quadlet_secret_files | length > 0
-  notify: runtime secret cleanup
-  changed_when: true
+    quadlet_secret_env: "{{ runtime_secret_context.env }}"
+    quadlet_secret_files: "{{ runtime_secret_context.files }}"
 
 - name: Ensure quadlet directory exists
   file:
     path: "{{ quadlet_base_dir }}"
     state: directory
     mode: '0755'
-  become: {{ (quadlet_effective_scope == 'system') | bool }}
-
-- name: Ensure quadlet secret directory exists
-  file:
-    path: "{{ quadlet_secret_dir }}"
-    state: directory
-    mode: '0700'
-  when: quadlet_secret_files | length > 0
-  become: {{ (quadlet_effective_scope == 'system') | bool }}
-
-- name: Write Quadlet environment file
-  copy:
-    dest: "{{ quadlet_env_path }}"
-    mode: '0600'
-    content: |-
-      {% for item in quadlet_secret_env %}
-      {{ item.name }}={{ item.value }}
-      {% endfor %}
-  when: quadlet_secret_env | length > 0
-  no_log: true
-  become: {{ (quadlet_effective_scope == 'system') | bool }}
-
-- name: Write Quadlet secret files
-  copy:
-    dest: "{{ quadlet_secret_dir }}/{{ item.name }}"
-    mode: "{{ item.mode | default('0400') }}"
-    content: "{{ item.value | default(item.content) }}"
-  loop: "{{ quadlet_secret_files }}"
-  when: quadlet_secret_files | length > 0
-  no_log: true
   become: {{ (quadlet_effective_scope == 'system') | bool }}
 
 - name: Copy Quadlet container file

@@ -1,16 +1,15 @@
 #jinja2: lstrip_blocks: True, trim_blocks: True
-{% from '_common.j2' import with_defaults %}
-{% set _defaults_ctx = namespace(security=None, catalog=None) %}
-{% call(defaults, catalog) with_defaults(service_security, secrets) %}
-  {% set _defaults_ctx.security = defaults %}
-  {% set _defaults_ctx.catalog = catalog %}
+{% from '_common.j2' import service_context %}
+{% set _ctx = namespace(security=None, secrets=None, mounts=None) %}
+{% call(security_defaults, secret_context, mount_context) service_context(service_security, secrets, mounts) %}
+  {% set _ctx.security = security_defaults %}
+  {% set _ctx.secrets = secret_context %}
+  {% set _ctx.mounts = mount_context %}
 {% endcall %}
-{% set shma_security_defaults = _defaults_ctx.security %}
+{% set shma_security_defaults = _ctx.security %}
+{% set shma_secret_context = _ctx.secrets %}
 {% set svc_name = service_name | default(service_id) %}
 {% set svc_namespace = service_namespace | default('default') %}
-{% set mounts_config = mounts | default({}) %}
-{% set ephemeral_mounts = mounts_config.ephemeral_mounts | default([]) %}
-{% set default_apply_targets = ['docker', 'podman', 'kubernetes', 'proxmox', 'baremetal'] %}
 {% set default_run_user = shma_security_defaults.run_user %}
 {% set default_run_group = shma_security_defaults.run_group %}
 {% set read_only_root = shma_security_defaults.read_only_root %}
@@ -22,38 +21,38 @@
 {% set ingress_flag = ingress_spec.get('enabled') if ingress_spec is mapping else none %}
 {% set ingress_enabled = (ingress_flag if ingress_flag is not none else (ingress_routes | length > 0)) %}
 {% set k8s_ephemeral = namespace(items=[]) %}
-{% for mount in ephemeral_mounts %}
-  {% set apply_targets = mount.apply_to | default(default_apply_targets) %}
-  {% if 'kubernetes' in apply_targets %}
-    {% set volume_name = mount.name | default('ephemeral-' ~ loop.index) %}
-    {% set entry = {
-      'volume_name': volume_name,
-      'mount_path': mount.path,
-      'medium': mount.medium | default('Memory'),
-      'size': mount.size if mount.size is defined else None,
-      'read_only': mount.read_only if mount.read_only is defined else false
-    } %}
-    {% set _ = k8s_ephemeral.items.append(entry) %}
-  {% endif %}
+{% set kubernetes_ephemeral_mounts = _ctx.mounts.ephemeral | select_ephemeral_mounts('kubernetes') %}
+{% for mount in kubernetes_ephemeral_mounts %}
+  {% set volume_name = mount.name | default('ephemeral-' ~ loop.index) %}
+  {% set entry = {
+    'volume_name': volume_name,
+    'mount_path': mount.path,
+    'medium': mount.medium | default('Memory'),
+    'size': mount.size,
+    'read_only': mount.read_only
+  } %}
+  {% set _ = k8s_ephemeral.items.append(entry) %}
 {% endfor %}
-{% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] %}
-{% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
-{% set inline_env = service_env | default([]) | list %}
-{% set inline_env_ns = namespace(items=inline_env) %}
+{% set secret_env = shma_secret_context.env %}
+{% set file_secrets = shma_secret_context.files %}
 {% set env_secret_name = svc_name + '-env' %}
 {% set file_secret_name = svc_name + '-files' %}
-{% set health_cmd = health | health_command %}
-{% set health_interval_seconds = (health.interval | default('10s')) | regex_replace('s$', '') | int %}
-{% set health_timeout_seconds = (health.timeout | default('5s')) | regex_replace('s$', '') | int %}
-{% set health_retries = health.retries | default(3) %}
+{% set health_details = health | health_spec %}
+{% set health_cmd = health_details.command %}
+{% set health_interval_seconds = (health_details.interval | regex_replace('s$', '')) | int %}
+{% set health_timeout_seconds = (health_details.timeout | regex_replace('s$', '')) | int %}
+{% set health_retries = health_details.retries %}
 {% set replicas = service_replicas | default(1) %}
 {% set ports = service_ports | default([]) %}
-{% set container_port = ports[0].target if ports | length > 0 else 8080 %}
-{% set service_port_value = ports[0].published if ports | length > 0 and ports[0].published is defined else container_port %}
+{% set primary_port = ports[0] if ports | length > 0 else none %}
+{% set container_port = primary_port.target if primary_port is not none else none %}
+{% set service_port_value = primary_port.published if primary_port is not none and primary_port.published is defined else (primary_port.target if primary_port is not none else none) %}
 {% set resources = service_resources | default({'memory_mb': 256, 'cpu_cores': 1}) %}
 {% set memory_request = resources.memory_mb | default(256) %}
 {% set cpu_cores = resources.cpu_cores | default(1) %}
 {% set connections_per_second = resources.connections_per_second if resources.connections_per_second is defined else None %}
+{% set inline_env = service_env | merge_inline_environment(rotation_timestamp=shma_secret_context.rotation_timestamp, connections_per_second=connections_per_second, service_name=svc_name, primary_service_name=svc_name) %}
+{% set inline_env_ns = namespace(items=inline_env) %}
 {% set volume_config = service_volumes[0] if service_volumes is defined and service_volumes | length > 0 else None %}
 {% set use_host_path = volume_config is mapping and volume_config.host_path is defined %}
 {% set host_path = volume_config.host_path if use_host_path else None %}
@@ -123,9 +122,9 @@ spec:
     metadata:
       labels:
         app: {{ svc_name }}
-{% if secrets is defined and secrets.rotation_timestamp is defined and secrets.rotation_timestamp is not none %}
+{% if shma_secret_context.rotation_timestamp is not none %}
       annotations:
-        shma.dev/secrets-rotation: "{{ secrets.rotation_timestamp }}"
+        shma.dev/secrets-rotation: "{{ shma_secret_context.rotation_timestamp }}"
 {% endif %}
     spec:
       securityContext:
@@ -145,12 +144,6 @@ spec:
 {% for cap in drop_caps_default %}
                 - {{ cap }}
 {% endfor %}
-{% endif %}
-{% if secrets is defined and secrets.rotation_timestamp is defined and secrets.rotation_timestamp is not none %}
-  {% set _ = inline_env_ns.items.append({'name': 'SHMA_SECRETS_ROTATION', 'value': secrets.rotation_timestamp | string}) %}
-{% endif %}
-{% if connections_per_second is not none %}
-  {% set _ = inline_env_ns.items.append({'name': 'CONNECTIONS_PER_SECOND', 'value': connections_per_second | string}) %}
 {% endif %}
 {% set inline_env = inline_env_ns.items %}
 {% set has_secret_env = secret_env | length > 0 %}
@@ -173,8 +166,10 @@ spec:
 {% endfor %}
 {% endif %}
 {% endif %}
+{% if container_port is not none %}
           ports:
             - containerPort: {{ container_port }}
+{% endif %}
           volumeMounts:
             - name: data
               mountPath: {{ volume_mount_path }}
@@ -247,6 +242,7 @@ spec:
                 path: {{ secret.name }}
 {% endfor %}
 {% endif %}
+{% if container_port is not none and service_port_value is not none %}
 ---
 apiVersion: v1
 kind: Service
@@ -300,5 +296,37 @@ spec:
         - {{ host }}
 {% endfor %}
 {% endfor %}
+{% endif %}
+{% endif %}
+{% endif %}
+{% set network_policy_config = service_network_policy | default({}) %}
+{% set network_policy_enabled = network_policy_config.enabled if network_policy_config.enabled is defined else true %}
+{% if network_policy_enabled %}
+{% set policy_types = (network_policy_config.policy_types | default(['Ingress', 'Egress'])) | unique %}
+{% set default_ingress_rules = [{'from': [{'namespaceSelector': {'matchLabels': {'kubernetes.io/metadata.name': svc_namespace}}}]}] %}
+{% set default_egress_rules = [{'to': [{'namespaceSelector': {}}]}] %}
+{% set ingress_rules = network_policy_config.ingress | default(default_ingress_rules) %}
+{% set egress_rules = network_policy_config.egress | default(default_egress_rules) %}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ svc_name }}
+  namespace: {{ svc_namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ svc_name }}
+  policyTypes:
+{% for policy in policy_types %}
+    - {{ policy }}
+{% endfor %}
+{% if 'Ingress' in policy_types %}
+  ingress:
+{{ ingress_rules | to_nice_yaml(indent=4) | indent(4) }}
+{% endif %}
+{% if 'Egress' in policy_types %}
+  egress:
+{{ egress_rules | to_nice_yaml(indent=4) | indent(4) }}
 {% endif %}
 {% endif %}

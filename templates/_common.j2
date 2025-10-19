@@ -2,31 +2,13 @@
   Helper macro to provide shared runtime defaults.
 #}
 
-{% macro with_defaults(service_security=None, secrets=None) -%}
-  {% set security = service_security | default({}) %}
-  {% set drop_caps = security.capabilities_drop | default(['ALL']) %}
-  {% if drop_caps is string %}{% set drop_caps = [drop_caps] %}{% endif %}
-  {% set bounding = security.capability_bounding_set if security.capability_bounding_set is defined else [] %}
-  {% if bounding is string %}{% set bounding = [bounding] %}{% endif %}
-  {% set defaults = {
-    'run_user': security.run_as_user if security.run_as_user is defined else 65532,
-    'run_group': security.run_as_group if security.run_as_group is defined else (security.run_as_user if security.run_as_user is defined else 65532),
-    'read_only_root': security.read_only_root_filesystem if security.read_only_root_filesystem is defined else true,
-    'capabilities_drop': drop_caps,
-    'no_new_privileges': security.no_new_privileges if security.no_new_privileges is defined else true,
-    'apparmor_profile': security.apparmor_profile if security.apparmor_profile is defined else 'docker-default',
-    'allow_privilege_escalation': security.allow_privilege_escalation if security.allow_privilege_escalation is defined else not (security.no_new_privileges if security.no_new_privileges is defined else true),
-    'compose_user': security.user if security.user is defined else none,
-    'capability_bounding_set': bounding
-  } %}
+{% macro service_context(service_security=None, secrets=None, mounts=None) -%}
+  {% set security_defaults = service_security | default({}) | normalize_security %}
+  {% set secret_context = secrets | default({}) | normalize_secrets %}
+  {% set mount_context = mounts | default({}) | normalize_mounts %}
+  {{ caller(security_defaults, secret_context, mount_context) }}
+{%- endmacro %}
 
-  {% set secret_source = secrets | default({}) %}
-  {% set env_items = secret_source.env if secret_source.env is not none else [] %}
-  {% set file_items = secret_source.files if secret_source.files is not none else [] %}
-  {% set catalog = {
-    'env_names': env_items | map(attribute='name') | reject('equalto', None) | list,
-    'file_names': file_items | map(attribute='name') | reject('equalto', None) | list
-  } %}
-
-  {{ caller(defaults, catalog) }}
+{% macro health_defaults(health) -%}
+  {{ return(health | health_spec) }}
 {%- endmacro %}

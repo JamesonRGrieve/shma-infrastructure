@@ -81,8 +81,9 @@ networks:
 
 ## Contract inputs
 
-- `secrets.env` entries become environment variables supplied directly to the Compose CLI; values stay in-memory during deployment.
-- `secrets.files` entries create files in `secrets/<name>` and populate the Compose `secrets` map.
+- `secrets.items` unify environment and file secrets. Entries with `type: env` are exported as environment variables when the Compose
+  deployment runs. Entries with `type: file` materialise temporary files under `secrets/<name>` and populate the Compose `secrets`
+  map for containers that consume them.
 - `secrets.shred_after_apply` defaults to `true`, removing rendered secrets after deployment. When you must retain the artifacts,
   set `secrets.shred_after_apply: false` and record the rationale in `secrets.shred_waiver_reason`.
 - `secrets.rotation_timestamp` (optional) forces Compose to recreate containers whenever you bump the value—use it to rotate credentials without editing unrelated settings.
@@ -113,11 +114,13 @@ docker compose -f /tmp/ansible-runtime/sample-service/docker.yml config
 
 ### Secret transport differences
 
-Docker injects `secrets.env` values directly into the Compose execution environment while the containers start. Kubernetes, by
-contrast, materialises secrets as mounted files, and Podman Quadlet follows the Docker behaviour. When migrating from Docker or
-Podman to Kubernetes, convert any secrets that workloads read from environment variables into file-based reads or populate the
-same values in ConfigMaps/Secrets mounted under `secrets.files`. The reverse migration—Kubernetes to Docker/Podman—requires you
-to shift file consumers to read from environment variables or render the desired files with `secrets.files` during deploy time.
+Docker injects secrets declared with `type: env` directly into the Compose execution environment while the containers start.
+Entries declared with `type: file` are written to `secrets/<name>` before Compose runs and shredded afterwards when
+`secrets.shred_after_apply` is left at its default. Kubernetes always mounts secrets as files, while Podman Quadlet mirrors the
+Docker behaviour. When migrating from Docker or Podman to Kubernetes, convert any secrets that workloads read from environment
+variables into file-based reads or populate the same values in ConfigMaps/Secrets mounted under file entries. The reverse
+migration—Kubernetes to Docker/Podman—requires you to shift file consumers to read from environment variables or render the
+desired files with `type: file` entries during deploy time.
 4. Sets `service_ip` for the unified health gate.
 5. Recreates containers automatically whenever `secrets.rotation_timestamp` changes.
 
