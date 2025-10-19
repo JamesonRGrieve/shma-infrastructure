@@ -342,6 +342,8 @@ properties:
         type: array
         items:
           type: string
+      user_namespace:
+        type: string
       apparmor_profile:
         type: string
       private_tmp:
