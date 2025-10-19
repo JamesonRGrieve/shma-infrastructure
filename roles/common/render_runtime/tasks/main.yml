@@ -90,6 +90,24 @@
       Proxmox runtime requires service_ip and service_container configuration to be provided.
   when: runtime == 'proxmox'
 
+- name: Validate Proxmox network gateway configuration
+  assert:
+    that:
+      - (
+          (
+            service_container is defined
+            and service_container.gateway is defined
+            and (service_container.gateway | string | trim | length) > 0
+          )
+          or (
+            service_gateway is defined
+            and (service_gateway | string | trim | length) > 0
+          )
+        )
+    fail_msg: >-
+      Proxmox runtime requires a gateway defined via service_container.gateway or service_gateway for network routing.
+  when: runtime == 'proxmox'
+
 - name: Initialize compose service name accumulator
   set_fact:
     render_compose_service_names: []

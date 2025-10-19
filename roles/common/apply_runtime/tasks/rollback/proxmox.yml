@@ -1,0 +1,18 @@
+---
+- name: Stop Proxmox container after failure
+  community.general.proxmox:
+    vmid: "{{ lxc_config.container.vmid }}"
+    node: "{{ proxmox_node }}"
+    api_token_id: "{{ proxmox_api_token_id }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
+    api_host: "{{ proxmox_api_host }}"
+    state: stopped
+  when:
+    - lxc_config is defined
+    - lxc_config.container is defined
+    - lxc_config.container.vmid is defined
+    - proxmox_node is defined
+    - proxmox_api_token_id is defined
+    - proxmox_api_token_secret is defined
+    - proxmox_api_host is defined
+  failed_when: false

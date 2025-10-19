@@ -1,0 +1,11 @@
+---
+- name: Remove Docker Compose deployment after failure
+  community.docker.docker_compose_v2:
+    project_src: "{{ runtime_output_dir }}"
+    files:
+      - "{{ runtime_config_path | basename }}"
+    state: absent
+  when:
+    - runtime_output_dir is defined
+    - runtime_config_path is defined
+  failed_when: false

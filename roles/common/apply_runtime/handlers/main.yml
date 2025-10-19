@@ -7,14 +7,19 @@
     state: restarted
   delegate_to: "{{ container_ip | default(service_ip | default(inventory_hostname)) }}"
 
-- name: Shred Docker runtime secrets
-  listen: docker runtime secret cleanup
-  ansible.builtin.include_tasks: secret_cleanup.yml
-  vars:
-    cleanup_secret_context: "{{ docker_secret_cleanup | default({}) }}"
+- name: Shred runtime secrets
+  listen:
+    - runtime secret cleanup
+  ansible.builtin.include_tasks:
+    file: secret_cleanup.yml
+  loop: "{{ runtime_secret_cleanup_contexts | default([]) }}"
+  loop_control:
+    loop_var: cleanup_secret_context
+  when: runtime_secret_cleanup_contexts is defined and runtime_secret_cleanup_contexts | length > 0
 
-- name: Shred Podman runtime secrets
-  listen: podman runtime secret cleanup
-  ansible.builtin.include_tasks: secret_cleanup.yml
-  vars:
-    cleanup_secret_context: "{{ podman_secret_cleanup | default({}) }}"
+- name: Reset runtime secret cleanup queue
+  listen:
+    - runtime secret cleanup
+  set_fact:
+    runtime_secret_cleanup_contexts: []
+  when: runtime_secret_cleanup_contexts is defined
