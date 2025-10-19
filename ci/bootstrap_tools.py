@@ -13,7 +13,7 @@ from typing import Dict
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
-DEFAULT_CONFIG = Path("ci/tool_versions.yml")
+DEFAULT_CONFIG = Path("ci/version_matrix.yml")
 DEFAULT_CACHE_DIR = Path.home() / ".cache" / "ci-tools"
 DEFAULT_BIN_DIR = Path.home() / ".local" / "bin"
 
