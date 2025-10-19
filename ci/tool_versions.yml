@@ -1,0 +1,91 @@
+{
+  "tools": {
+    "actionlint": {
+      "version": "1.7.1",
+      "artifact": "https://github.com/rhysd/actionlint/releases/download/v{version}/actionlint_{version}_linux_amd64.tar.gz",
+      "checksums": {
+        "url": "https://github.com/rhysd/actionlint/releases/download/v{version}/actionlint_{version}_checksums.txt",
+        "pattern": "actionlint_{version}_linux_amd64.tar.gz"
+      },
+      "binary": "actionlint",
+      "extract": {
+        "member": "actionlint"
+      }
+    },
+    "gitleaks": {
+      "version": "8.18.2",
+      "artifact": "https://github.com/zricethezav/gitleaks/releases/download/v{version}/gitleaks_{version}_linux_x64.tar.gz",
+      "checksums": {
+        "url": "https://github.com/zricethezav/gitleaks/releases/download/v{version}/gitleaks_{version}_checksums.txt",
+        "pattern": "gitleaks_{version}_linux_x64.tar.gz"
+      },
+      "sigstore": {
+        "signature": "https://github.com/zricethezav/gitleaks/releases/download/v{version}/gitleaks_{version}_linux_x64.tar.gz.sig",
+        "certificate": "https://github.com/zricethezav/gitleaks/releases/download/v{version}/gitleaks_{version}_linux_x64.tar.gz.pem",
+        "identity_regexp": "https://github.com/zricethezav/gitleaks/.+",
+        "oidc_issuer": "https://token.actions.githubusercontent.com"
+      },
+      "binary": "gitleaks",
+      "extract": {
+        "member": "gitleaks"
+      }
+    },
+    "conftest": {
+      "version": "0.48.0",
+      "artifact": "https://github.com/open-policy-agent/conftest/releases/download/v{version}/conftest_{version}_Linux_x86_64.tar.gz",
+      "sha256": "f3f9fa4c8ad5ac2ffb5f3eeb8000d10a229cc3f0e96a4b8b3b3aa259b91c8d1d",
+      "sigstore": {
+        "signature": "https://github.com/open-policy-agent/conftest/releases/download/v{version}/conftest_{version}_Linux_x86_64.tar.gz.sig",
+        "certificate": "https://github.com/open-policy-agent/conftest/releases/download/v{version}/conftest_{version}_Linux_x86_64.tar.gz.pem",
+        "identity_regexp": "https://github.com/open-policy-agent/conftest/.+",
+        "oidc_issuer": "https://token.actions.githubusercontent.com"
+      },
+      "binary": "conftest",
+      "extract": {
+        "member": "conftest"
+      }
+    },
+    "trivy": {
+      "version": "0.54.1",
+      "artifact": "https://github.com/aquasecurity/trivy/releases/download/v{version}/trivy_{version}_Linux-64bit.tar.gz",
+      "checksums": {
+        "url": "https://github.com/aquasecurity/trivy/releases/download/v{version}/trivy_{version}_checksums.txt",
+        "pattern": "trivy_{version}_Linux-64bit.tar.gz"
+      },
+      "sigstore": {
+        "signature": "https://github.com/aquasecurity/trivy/releases/download/v{version}/trivy_{version}_Linux-64bit.tar.gz.sig",
+        "certificate": "https://github.com/aquasecurity/trivy/releases/download/v{version}/trivy_{version}_Linux-64bit.tar.gz.pem",
+        "identity_regexp": "https://github.com/aquasecurity/trivy/.+",
+        "oidc_issuer": "https://token.actions.githubusercontent.com"
+      },
+      "binary": "trivy",
+      "extract": {
+        "member": "trivy"
+      }
+    },
+    "cosign": {
+      "version": "2.4.0",
+      "artifact": "https://github.com/sigstore/cosign/releases/download/v{version}/cosign-linux-amd64",
+      "sha256": "2a052d27be27fa9982f227632a38f967e88be792e53aa58a56c9e45e4515f7f7",
+      "sigstore": {
+        "signature": "https://github.com/sigstore/cosign/releases/download/v{version}/cosign-linux-amd64.sig",
+        "certificate": "https://github.com/sigstore/cosign/releases/download/v{version}/cosign-linux-amd64.pem",
+        "identity_regexp": "https://github.com/sigstore/cosign/.+",
+        "oidc_issuer": "https://token.actions.githubusercontent.com"
+      },
+      "binary": "cosign"
+    },
+    "kind": {
+      "version": "0.22.0",
+      "artifact": "https://github.com/kubernetes-sigs/kind/releases/download/v{version}/kind-linux-amd64",
+      "sha256": "fa28e8a3d51d38958cd97df1d3b1120686afa6462d39d7496b3fd1d195e27eb0",
+      "sigstore": {
+        "signature": "https://github.com/kubernetes-sigs/kind/releases/download/v{version}/kind-linux-amd64.sig",
+        "certificate": "https://github.com/kubernetes-sigs/kind/releases/download/v{version}/kind-linux-amd64.pem",
+        "identity_regexp": "https://github.com/kubernetes-sigs/kind/.+",
+        "oidc_issuer": "https://token.actions.githubusercontent.com"
+      },
+      "binary": "kind"
+    }
+  }
+}

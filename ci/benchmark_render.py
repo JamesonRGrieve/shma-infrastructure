@@ -11,9 +11,55 @@ from typing import Dict, List
 
 import yaml
 
-MAX_RENDER_SECONDS = 15.0
-MAX_MANIFEST_SIZE_BYTES = 512 * 1024
-SUPPORTED_RUNTIMES = ["docker", "podman", "kubernetes", "proxmox", "baremetal"]
+DEFAULT_CONFIG_PATH = Path("ci/benchmark_config.yml")
+
+
+def load_config(config_path: Path) -> dict:
+    try:
+        return json.loads(config_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {
+            "defaults": {
+                "max_render_seconds": 15.0,
+                "max_manifest_size_bytes": 512 * 1024,
+                "runtimes": [
+                    "docker",
+                    "podman",
+                    "kubernetes",
+                    "proxmox",
+                    "baremetal",
+                ],
+            },
+            "services": {},
+            "files": {},
+        }
+
+
+def resolve_settings(
+    service_file: Path, service_id: str, config: dict
+) -> Dict[str, object]:
+    defaults = config.get("defaults", {})
+    settings: Dict[str, object] = {
+        "max_render_seconds": defaults.get("max_render_seconds", 15.0),
+        "max_manifest_size_bytes": defaults.get("max_manifest_size_bytes", 512 * 1024),
+        "runtimes": list(defaults.get("runtimes", [])),
+    }
+
+    file_key = str(service_file)
+    file_overrides = config.get("files", {}).get(file_key, {})
+    service_overrides = config.get("services", {}).get(service_id, {})
+
+    for overrides in (file_overrides, service_overrides):
+        if "max_render_seconds" in overrides:
+            settings["max_render_seconds"] = float(overrides["max_render_seconds"])
+        if "max_manifest_size_bytes" in overrides:
+            settings["max_manifest_size_bytes"] = int(
+                overrides["max_manifest_size_bytes"]
+            )
+        if "runtimes" in overrides:
+            settings["runtimes"] = list(overrides["runtimes"])
+
+    return settings
 
 
 def load_service_id(service_file: Path) -> str:
@@ -46,8 +92,9 @@ def measure_manifest(runtime_dir: Path, runtime: str) -> int:
     return manifest_path.stat().st_size
 
 
-def benchmark(service_file: Path) -> Dict[str, Dict[str, float]]:
-    service_id = load_service_id(service_file)
+def benchmark(
+    service_file: Path, service_id: str, runtimes: List[str]
+) -> Dict[str, Dict[str, float]]:
     runtime_dir = Path("/tmp/ansible-runtime") / service_id
     results: Dict[str, Dict[str, float]] = {}
 
@@ -55,23 +102,31 @@ def benchmark(service_file: Path) -> Dict[str, Dict[str, float]]:
         shutil.rmtree(runtime_dir)
     runtime_dir.mkdir(parents=True, exist_ok=True)
 
-    for runtime in SUPPORTED_RUNTIMES:
+    for runtime in runtimes:
         duration = render_runtime(service_file, runtime)
         size_bytes = measure_manifest(runtime_dir, runtime)
         results[runtime] = {"duration": duration, "size_bytes": size_bytes}
     return results
 
 
-def validate(results: Dict[str, Dict[str, float]]) -> List[str]:
+def validate(
+    results: Dict[str, Dict[str, float]],
+    max_render_seconds: float,
+    max_manifest_size_bytes: int,
+) -> List[str]:
     failures: List[str] = []
     for runtime, metrics in results.items():
-        if metrics["duration"] > MAX_RENDER_SECONDS:
+        if metrics["duration"] > max_render_seconds:
             failures.append(
-                f"Rendering {runtime} runtime exceeded {MAX_RENDER_SECONDS}s (actual {metrics['duration']:.2f}s)"
+                "Rendering "
+                f"{runtime} runtime exceeded {max_render_seconds}s "
+                f"(actual {metrics['duration']:.2f}s)"
             )
-        if metrics["size_bytes"] > MAX_MANIFEST_SIZE_BYTES:
+        if metrics["size_bytes"] > max_manifest_size_bytes:
             failures.append(
-                f"Manifest for {runtime} runtime exceeded {MAX_MANIFEST_SIZE_BYTES} bytes (actual {metrics['size_bytes']})"
+                "Manifest for "
+                f"{runtime} runtime exceeded {max_manifest_size_bytes} bytes "
+                f"(actual {metrics['size_bytes']})"
             )
     return failures
 
@@ -83,12 +138,30 @@ def main() -> None:
     parser.add_argument(
         "service_file", type=Path, help="Path to the service definition file"
     )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG_PATH,
+        help="Optional path to benchmark configuration overrides",
+    )
     args = parser.parse_args()
 
-    results = benchmark(args.service_file)
+    service_id = load_service_id(args.service_file)
+    config = load_config(args.config)
+    settings = resolve_settings(args.service_file, service_id, config)
+
+    runtimes = settings.get("runtimes", [])
+    if not runtimes:
+        raise SystemExit("No runtimes configured for benchmark execution")
+
+    results = benchmark(args.service_file, service_id, list(runtimes))
     print(json.dumps(results, indent=2))
 
-    failures = validate(results)
+    failures = validate(
+        results,
+        float(settings["max_render_seconds"]),
+        int(settings["max_manifest_size_bytes"]),
+    )
     if failures:
         for failure in failures:
             print(failure, file=sys.stderr)

@@ -30,65 +30,32 @@ jobs:
       SERVICE_FILE: ${{ matrix.service_file }}
       PYTHONUNBUFFERED: "1"
     steps:
-      - name: Checkout
-        uses: actions/checkout@b4ffde65f463d58a31b38cfa6d26b4f752063b9
-
-      - name: Set up Python
-        uses: actions/setup-python@13f3840a65875556b0f1a6d6e5d79d993d3f5a6b
+      - name: Prepare Python runtime
+        id: setup
+        uses: ./.github/actions/setup-python-env
         with:
-          python-version: '3.11'
+          lane: ${{ matrix.lane }}
 
-      - name: Cache pip
-        uses: actions/cache@13dac90522f915087a5de3c972d4d68512c964b0
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install --requirement requirements.txt
-
-      - name: Install Ansible collections
-        run: ansible-galaxy collection install -r ci/collections-${{ matrix.lane }}.yml
-
-      - name: Install additional tooling
+      - name: Prepare local bin directory
         run: |
           mkdir -p "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
-          mv actionlint/actionlint "$HOME/.local/bin/actionlint"
-          rm -rf actionlint
-          curl -fsSL https://github.com/zricethezav/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz -o gitleaks.tar.gz
-          curl -fsSL https://github.com/zricethezav/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_checksums.txt -o gitleaks_checksums.txt
-          grep gitleaks_8.18.2_linux_x64.tar.gz gitleaks_checksums.txt | sha256sum -c -
-          tar -xzf gitleaks.tar.gz gitleaks
-          mv gitleaks "$HOME/.local/bin/gitleaks"
-          rm gitleaks.tar.gz gitleaks_checksums.txt
-          curl -fsSL https://github.com/open-policy-agent/conftest/releases/download/v0.48.0/conftest_0.48.0_Linux_x86_64.tar.gz -o conftest.tar.gz
-          echo "f3f9fa4c8ad5ac2ffb5f3eeb8000d10a229cc3f0e96a4b8b3b3aa259b91c8d1d  conftest.tar.gz" | sha256sum -c -
-          tar -xzf conftest.tar.gz conftest
-          mv conftest "$HOME/.local/bin/conftest"
-          rm conftest.tar.gz
-          curl -fsSL https://github.com/aquasecurity/trivy/releases/download/v0.54.1/trivy_0.54.1_Linux-64bit.tar.gz -o trivy.tar.gz
-          curl -fsSL https://github.com/aquasecurity/trivy/releases/download/v0.54.1/trivy_0.54.1_checksums.txt -o trivy_checksums.txt
-          grep trivy_0.54.1_Linux-64bit.tar.gz trivy_checksums.txt | sha256sum -c -
-          tar -xzf trivy.tar.gz trivy
-          mv trivy "$HOME/.local/bin/trivy"
-          rm trivy.tar.gz trivy_checksums.txt
-          curl -fsSL https://github.com/sigstore/cosign/releases/download/v2.4.0/cosign-linux-amd64 -o "$HOME/.local/bin/cosign"
-          echo "2a052d27be27fa9982f227632a38f967e88be792e53aa58a56c9e45e4515f7f7  $HOME/.local/bin/cosign" | sha256sum -c -
-          chmod +x "$HOME/.local/bin/cosign"
-          curl -fsSL https://github.com/containerd/nerdctl/releases/download/v2.0.0/nerdctl-2.0.0-linux-amd64.tar.gz -o nerdctl.tar.gz
-          tar -xzf nerdctl.tar.gz nerdctl
-          mv nerdctl "$HOME/.local/bin/nerdctl"
-          rm nerdctl.tar.gz
+
+      - name: Cache CI tools
+        id: tool-cache
+        uses: actions/cache@13dac90522f915087a5de3c972d4d68512c964b0
+        with:
+          path: ~/.cache/ci-tools
+          key: ${{ runner.os }}-ci-tools-${{ hashFiles('ci/tool_versions.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-ci-tools-
+
+      - name: Install verified tooling
+        run: python ci/bootstrap_tools.py --cache-dir "$HOME/.cache/ci-tools" --bin-dir "$HOME/.local/bin"
 
       - name: Install kubectl
         run: |
-          version="${{ matrix.lane == 'stable' && 'v1.29.3' || 'v1.31.1' }}"
+          version="${{ steps.setup.outputs.kubectl-version }}"
           curl -fsSL https://dl.k8s.io/release/${version}/bin/linux/amd64/kubectl -o /tmp/kubectl
           curl -fsSL https://dl.k8s.io/${version}/bin/linux/amd64/kubectl.sha256 -o /tmp/kubectl.sha256
           echo "$(cat /tmp/kubectl.sha256)  /tmp/kubectl" | sha256sum -c -
@@ -99,7 +66,19 @@ jobs:
         run: python ci/verify_versions.py
 
       - name: Run gitleaks
-        run: gitleaks detect --no-banner --redact --source .
+        id: gitleaks
+        continue-on-error: true
+        run: gitleaks detect --no-banner --redact --exit-code 1 --report-format sarif --report-path gitleaks.sarif --source .
+
+      - name: Upload gitleaks SARIF
+        if: always() && steps.gitleaks.outcome != 'skipped'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gitleaks.sarif
+
+      - name: Enforce gitleaks policy
+        if: steps.gitleaks.outcome == 'failure'
+        run: exit 1
 
       - name: Run actionlint
         run: actionlint
@@ -112,25 +91,7 @@ jobs:
 
       - name: Determine service metadata
         id: metadata
-        run: |
-          python - <<'PY'
-import os
-from pathlib import Path
-import yaml
-
-service_file = Path(os.environ['SERVICE_FILE'])
-with service_file.open('r', encoding='utf-8') as handle:
-    document = yaml.safe_load(handle)
-service_id = document['service_id']
-service_name = document.get('service_name', service_id)
-namespace = document.get('service_namespace', 'default')
-output_dir = Path('/tmp/ansible-runtime') / service_id
-with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
-    fh.write(f"service_id={service_id}\n")
-    fh.write(f"service_name={service_name}\n")
-    fh.write(f"namespace={namespace}\n")
-    fh.write(f"runtime_dir={output_dir}\n")
-PY
+        run: python ci/get_service_metadata.py "${{ matrix.service_file }}"
 
       - name: Run yamllint
         run: |
@@ -177,11 +138,6 @@ PY
 
       - name: Validate Kubernetes manifest (server)
         run: |
-          kind_version="v0.22.0"
-          curl -fsSL https://github.com/kubernetes-sigs/kind/releases/download/${kind_version}/kind-linux-amd64 -o /tmp/kind
-          echo "fa28e8a3d51d38958cd97df1d3b1120686afa6462d39d7496b3fd1d195e27eb0  /tmp/kind" | sha256sum -c -
-          chmod +x /tmp/kind
-          sudo mv /tmp/kind /usr/local/bin/kind
           kind create cluster --name ci-${{ steps.metadata.outputs.service_id }}
           kubectl apply --dry-run=server --validate=strict -f ${{ steps.metadata.outputs.runtime_dir }}/kubernetes.yml
           kubectl diff -f ${{ steps.metadata.outputs.runtime_dir }}/kubernetes.yml || true
@@ -228,68 +184,41 @@ PY
     env:
       SERVICE_FILE: ${{ matrix.service_file }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@b4ffde65f463d58a31b38cfa6d26b4f752063b9
-
-      - name: Set up Python
-        uses: actions/setup-python@13f3840a65875556b0f1a6d6e5d79d993d3f5a6b
+      - name: Prepare Python runtime
+        id: setup
+        uses: ./.github/actions/setup-python-env
         with:
-          python-version: '3.11'
+          lane: stable
 
-      - name: Cache pip
+      - name: Prepare local bin directory
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Cache CI tools
+        id: integration-tool-cache
         uses: actions/cache@13dac90522f915087a5de3c972d4d68512c964b0
         with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          path: ~/.cache/ci-tools
+          key: ${{ runner.os }}-ci-tools-${{ hashFiles('ci/tool_versions.yml') }}
           restore-keys: |
-            ${{ runner.os }}-pip-
+            ${{ runner.os }}-ci-tools-
 
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install --requirement requirements.txt
-
-      - name: Install Ansible collections
-        run: ansible-galaxy collection install -r ci/collections-stable.yml
+      - name: Install verified tooling
+        run: python ci/bootstrap_tools.py --cache-dir "$HOME/.cache/ci-tools" --bin-dir "$HOME/.local/bin"
 
       - name: Install kubectl
         run: |
-          version="v1.29.3"
+          version="${{ steps.setup.outputs.kubectl-version }}"
           curl -fsSL https://dl.k8s.io/release/${version}/bin/linux/amd64/kubectl -o /tmp/kubectl
           curl -fsSL https://dl.k8s.io/${version}/bin/linux/amd64/kubectl.sha256 -o /tmp/kubectl.sha256
           echo "$(cat /tmp/kubectl.sha256)  /tmp/kubectl" | sha256sum -c -
           chmod +x /tmp/kubectl
           sudo mv /tmp/kubectl /usr/local/bin/kubectl
 
-      - name: Install KinD
-        run: |
-          kind_version="v0.22.0"
-          curl -fsSL https://github.com/kubernetes-sigs/kind/releases/download/${kind_version}/kind-linux-amd64 -o /tmp/kind
-          echo "fa28e8a3d51d38958cd97df1d3b1120686afa6462d39d7496b3fd1d195e27eb0  /tmp/kind" | sha256sum -c -
-          chmod +x /tmp/kind
-          sudo mv /tmp/kind /usr/local/bin/kind
-
       - name: Determine service metadata
         id: integration_metadata
-        run: |
-          python - <<'PY'
-import os
-from pathlib import Path
-import yaml
-
-service_file = Path(os.environ['SERVICE_FILE'])
-with service_file.open('r', encoding='utf-8') as handle:
-    document = yaml.safe_load(handle)
-service_id = document['service_id']
-service_name = document.get('service_name', service_id)
-namespace = document.get('service_namespace', 'default')
-output_dir = Path('/tmp/ansible-runtime') / service_id
-with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
-    fh.write(f"service_id={service_id}\n")
-    fh.write(f"service_name={service_name}\n")
-    fh.write(f"namespace={namespace}\n")
-    fh.write(f"runtime_dir={output_dir}\n")
-PY
+        run: python ci/get_service_metadata.py "${{ matrix.service_file }}"
 
       - name: Render Kubernetes manifest
         run: ansible-playbook tests/render.yml -e runtime=kubernetes -e service_definition_file=${{ matrix.service_file }}
@@ -326,8 +255,10 @@ PY
           SERVICE_NAME: ${{ steps.integration_metadata.outputs.service_name }}
         run: |
           kubectl get all -n $NAMESPACE -o wide || true
+          kubectl get events -n $NAMESPACE --sort-by=.lastTimestamp || true
           kubectl describe deployment/$SERVICE_NAME -n $NAMESPACE || true
           kubectl describe pods -n $NAMESPACE || true
+          kubectl logs -n $NAMESPACE -l app=$SERVICE_NAME --all-containers --tail=-1 || true
 
       - name: Tear down KinD cluster
         if: always()
@@ -349,29 +280,28 @@ PY
     env:
       SERVICE_FILE: ${{ matrix.service_file }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@b4ffde65f463d58a31b38cfa6d26b4f752063b9
-
-      - name: Set up Python
-        uses: actions/setup-python@13f3840a65875556b0f1a6d6e5d79d993d3f5a6b
+      - name: Prepare Python runtime
+        id: benchmark_setup
+        uses: ./.github/actions/setup-python-env
         with:
-          python-version: '3.11'
+          lane: stable
 
-      - name: Cache pip
+      - name: Prepare local bin directory
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Cache CI tools
+        id: benchmark-tool-cache
         uses: actions/cache@13dac90522f915087a5de3c972d4d68512c964b0
         with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          path: ~/.cache/ci-tools
+          key: ${{ runner.os }}-ci-tools-${{ hashFiles('ci/tool_versions.yml') }}
           restore-keys: |
-            ${{ runner.os }}-pip-
+            ${{ runner.os }}-ci-tools-
 
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install --requirement requirements.txt
-
-      - name: Install Ansible collections
-        run: ansible-galaxy collection install -r ci/collections-stable.yml
+      - name: Install verified tooling
+        run: python ci/bootstrap_tools.py --cache-dir "$HOME/.cache/ci-tools" --bin-dir "$HOME/.local/bin"
 
       - name: Benchmark runtime rendering
-        run: python ci/benchmark_render.py "${{ matrix.service_file }}"
+        run: python ci/benchmark_render.py --config ci/benchmark_config.yml "${{ matrix.service_file }}"

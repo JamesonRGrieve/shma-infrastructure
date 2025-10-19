@@ -1,0 +1,18 @@
+{
+  "python": {
+    "version": "3.11",
+    "prefix": "3.11."
+  },
+  "ansible": {
+    "package_prefix": "9.5.",
+    "core_prefix": "2.16."
+  },
+  "kubectl": {
+    "stable": "v1.29.3",
+    "latest": "v1.31.1"
+  },
+  "collections": {
+    "stable": "ci/collections-stable.yml",
+    "latest": "ci/collections-latest.yml"
+  }
+}

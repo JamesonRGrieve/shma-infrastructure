@@ -14,8 +14,21 @@ def load_yaml(path: Path) -> dict:
         raise ValueError(f"Failed to parse YAML file {path}: {exc}") from exc
 
 
+def _register_secret(secrets: set[str], raw_value: str | None) -> None:
+    if not raw_value:
+        return
+
+    text = str(raw_value)
+    if text:
+        secrets.add(text)
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped:
+                secrets.add(stripped)
+
+
 def gather_secret_values(service: dict) -> set[str]:
-    secrets = set()
+    secrets: set[str] = set()
     secret_block = service.get("secrets", {})
 
     def _collect_candidates(item: dict) -> set[str]:
@@ -27,14 +40,11 @@ def gather_secret_values(service: dict) -> set[str]:
         return candidates
 
     for item in secret_block.get("env", []) or []:
-        secrets.update(_collect_candidates(item))
+        _register_secret(secrets, item.get("value"))
 
     for item in secret_block.get("files", []) or []:
-
-        for field in ("value", "content"):
-            value = item.get(field)
-            if value:
-                secrets.add(str(value))
+        _register_secret(secrets, item.get("value"))
+        _register_secret(secrets, item.get("content"))
 
 
     return secrets
