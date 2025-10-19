@@ -3,52 +3,56 @@
 {% set svc_namespace = service_namespace | default('default') %}
 {% set mounts_config = mounts | default({}) %}
 {% set ephemeral_mounts = mounts_config.ephemeral_mounts | default([]) %}
-{% set default_apply_targets = ['docker', 'podman', 'kubernetes', 'proxmox', 'baremetal'] %}
-{% set security = service_security | default({}) %}
-{% set default_run_user = security.run_as_user if security.run_as_user is defined else 65532 %}
-{% set default_run_group = security.run_as_group if security.run_as_group is defined else default_run_user %}
-{% set read_only_root = security.read_only_root_filesystem if security.read_only_root_filesystem is defined else true %}
-{% set drop_caps_default = security.capabilities_drop | default(['ALL']) %}
-{% if drop_caps_default is string %}{% set drop_caps_default = [drop_caps_default] %}{% endif %}
-{% set no_new_privs = security.no_new_privileges if security.no_new_privileges is defined else true %}
-{% set allow_priv_escalation = security.allow_privilege_escalation if security.allow_privilege_escalation is defined else (not no_new_privs) %}
+{% set security_defaults = (service_security if service_security is defined else None) | normalize_security %}
+{% set default_run_user = security_defaults.run_as_user %}
+{% set default_run_group = security_defaults.run_as_group %}
+{% set read_only_root = security_defaults.read_only_root_filesystem %}
+{% set drop_caps_default = security_defaults.capabilities_drop %}
+{% set no_new_privs = security_defaults.no_new_privileges %}
+{% set allow_priv_escalation = security_defaults.allow_privilege_escalation %}
+{% set health_defaults = (health if health is defined else None) | normalize_health %}
 {% set ingress_spec = ingress | default({}) %}
 {% set ingress_routes = ingress_spec.routes | default([]) %}
 {% set ingress_flag = ingress_spec.get('enabled') if ingress_spec is mapping else none %}
 {% set ingress_enabled = (ingress_flag if ingress_flag is not none else (ingress_routes | length > 0)) %}
 {% set k8s_ephemeral = namespace(items=[]) %}
-{% for mount in ephemeral_mounts %}
-  {% set apply_targets = mount.apply_to | default(default_apply_targets) %}
-  {% if 'kubernetes' in apply_targets %}
-    {% set volume_name = mount.name | default('ephemeral-' ~ loop.index) %}
-    {% set entry = {
-      'volume_name': volume_name,
-      'mount_path': mount.path,
-      'medium': mount.medium | default('Memory'),
-      'size': mount.size if mount.size is defined else None,
-      'read_only': mount.read_only if mount.read_only is defined else false
-    } %}
-    {% set _ = k8s_ephemeral.items.append(entry) %}
-  {% endif %}
+{% for mount in ephemeral_mounts | select_mounts('kubernetes') %}
+  {% set volume_name = mount.name | default('ephemeral-' ~ loop.index) %}
+  {% set entry = {
+    'volume_name': volume_name,
+    'mount_path': mount.path,
+    'medium': mount.medium | default('Memory'),
+    'size': mount.size if mount.size is defined else None,
+    'read_only': mount.read_only if mount.read_only is defined else false
+  } %}
+  {% set _ = k8s_ephemeral.items.append(entry) %}
 {% endfor %}
-{% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] %}
-{% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
-{% set inline_env = service_env | default([]) | list %}
-{% set inline_env_ns = namespace(items=inline_env) %}
-{% set env_secret_name = svc_name + '-env' %}
-{% set file_secret_name = svc_name + '-files' %}
-{% set health_cmd = health.cmd | default(['true']) %}
-{% set health_interval_seconds = (health.interval | default('10s')) | regex_replace('s$', '') | int %}
-{% set health_timeout_seconds = (health.timeout | default('5s')) | regex_replace('s$', '') | int %}
-{% set health_retries = health.retries | default(3) %}
+{% set secrets_info = (secrets if secrets is defined else None) | normalize_secrets(svc_name) %}
+{% set secret_env = secrets_info.env %}
+{% set file_secrets = secrets_info.files %}
+{% set env_secret_name = secrets_info.env_secret_name %}
+{% set file_secret_name = secrets_info.file_secret_name %}
+{% set inline_env = service_env | default([]) %}
+{% set env_extras = [] %}
+{% if secrets_info.rotation_timestamp is not none %}
+  {% set _ = env_extras.append({'name': 'SHMA_SECRETS_ROTATION', 'value': secrets_info.rotation_timestamp | string}) %}
+{% endif %}
+{% set resources = service_resources | default({'memory_mb': 256, 'cpu_cores': 1}) %}
+{% if resources.connections_per_second is defined %}
+  {% set _ = env_extras.append({'name': 'CONNECTIONS_PER_SECOND', 'value': resources.connections_per_second | string}) %}
+{% endif %}
+{% set merged_env = inline_env | merge_environment(env_extras) %}
+{% set inline_env_items = merged_env.items %}
+{% set health_cmd = health_defaults.command %}
+{% set health_interval_seconds = health_defaults.interval_seconds %}
+{% set health_timeout_seconds = health_defaults.timeout_seconds %}
+{% set health_retries = health_defaults.retries %}
 {% set replicas = service_replicas | default(1) %}
 {% set ports = service_ports | default([]) %}
 {% set container_port = ports[0].target if ports | length > 0 else 8080 %}
 {% set service_port_value = ports[0].published if ports | length > 0 and ports[0].published is defined else container_port %}
-{% set resources = service_resources | default({'memory_mb': 256, 'cpu_cores': 1}) %}
 {% set memory_request = resources.memory_mb | default(256) %}
 {% set cpu_cores = resources.cpu_cores | default(1) %}
-{% set connections_per_second = resources.connections_per_second if resources.connections_per_second is defined else None %}
 {% set volume_config = service_volumes[0] if service_volumes is defined and service_volumes | length > 0 else None %}
 {% set use_host_path = volume_config is mapping and volume_config.host_path is defined %}
 {% set host_path = volume_config.host_path if use_host_path else None %}
@@ -118,9 +122,9 @@ spec:
     metadata:
       labels:
         app: {{ svc_name }}
-{% if secrets is defined and secrets.rotation_timestamp is defined and secrets.rotation_timestamp is not none %}
+{% if secrets_info.rotation_timestamp is not none %}
       annotations:
-        shma.dev/secrets-rotation: "{{ secrets.rotation_timestamp }}"
+        shma.dev/secrets-rotation: "{{ secrets_info.rotation_timestamp }}"
 {% endif %}
     spec:
       securityContext:
@@ -141,15 +145,8 @@ spec:
                 - {{ cap }}
 {% endfor %}
 {% endif %}
-{% if secrets is defined and secrets.rotation_timestamp is defined and secrets.rotation_timestamp is not none %}
-  {% set _ = inline_env_ns.items.append({'name': 'SHMA_SECRETS_ROTATION', 'value': secrets.rotation_timestamp | string}) %}
-{% endif %}
-{% if connections_per_second is not none %}
-  {% set _ = inline_env_ns.items.append({'name': 'CONNECTIONS_PER_SECOND', 'value': connections_per_second | string}) %}
-{% endif %}
-{% set inline_env = inline_env_ns.items %}
 {% set has_secret_env = secret_env | length > 0 %}
-{% set has_inline_env = inline_env | length > 0 %}
+{% set has_inline_env = inline_env_items | length > 0 %}
 {% if has_secret_env or has_inline_env %}
           env:
 {% if has_secret_env %}
@@ -162,7 +159,7 @@ spec:
 {% endfor %}
 {% endif %}
 {% if has_inline_env %}
-{% for item in inline_env %}
+{% for item in inline_env_items %}
             - name: {{ item.name }}
               value: {{ item.value | to_json }}
 {% endfor %}

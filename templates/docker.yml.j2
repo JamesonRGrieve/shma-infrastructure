@@ -1,19 +1,15 @@
 {%- set mounts_config = mounts | default({}) %}
 {%- set ephemeral_mounts = mounts_config.ephemeral_mounts | default([]) %}
-{%- set default_apply_targets = ['docker', 'podman', 'kubernetes', 'proxmox', 'baremetal'] %}
-{%- set security = service_security | default({}) %}
-{%- set default_run_user = security.run_as_user if security.run_as_user is defined else 65532 %}
-{%- set default_run_group = security.run_as_group if security.run_as_group is defined else default_run_user %}
-{%- set compose_user_default = security.user if security.user is defined else ((default_run_user | string) ~ ':' ~ (default_run_group | string)) %}
-{%- set read_only_root = security.read_only_root_filesystem if security.read_only_root_filesystem is defined else true %}
-{%- set drop_caps_default = security.capabilities_drop | default(['ALL']) %}
-{%- if drop_caps_default is string %}{%- set drop_caps_default = [drop_caps_default] %}{%- endif %}
-{%- set no_new_privs = security.no_new_privileges if security.no_new_privileges is defined else true %}
-{%- set default_apparmor = security.apparmor_profile if security.apparmor_profile is defined else 'docker-default' %}
+{%- set security_defaults = (service_security if service_security is defined else None) | normalize_security %}
+{%- set default_run_user = security_defaults.run_as_user %}
+{%- set default_run_group = security_defaults.run_as_group %}
+{%- set compose_user_default = security_defaults.compose_user %}
+{%- set read_only_root = security_defaults.read_only_root_filesystem %}
+{%- set drop_caps_default = security_defaults.capabilities_drop %}
+{%- set no_new_privs = security_defaults.no_new_privileges %}
+{%- set default_apparmor = security_defaults.apparmor_profile %}
 {%- set docker_tmpfs = namespace(items=[]) %}
-{%- for mount in ephemeral_mounts %}
-  {%- set apply_targets = mount.apply_to | default(default_apply_targets) %}
-  {%- if 'docker' in apply_targets %}
+{%- for mount in ephemeral_mounts | select_mounts('docker') %}
     {%- set options = [] %}
     {%- if mount.size is defined %}{%- set _ = options.append('size=' ~ mount.size) %}{%- endif %}
     {%- if mount.mode is defined %}{%- set _ = options.append('mode=' ~ mount.mode) %}{%- endif %}
@@ -34,8 +30,10 @@
 {% set resources = service_resources | default({}) %}
 {% set connections_per_second = resources.connections_per_second if resources.connections_per_second is defined else None %}
 {% set primary_service_name = service_name | default(service_id) %}
-{% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] %}
-{% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
+{% set secrets_info = (secrets if secrets is defined else None) | normalize_secrets(primary_service_name) %}
+{% set secret_env = secrets_info.env %}
+{% set file_secrets = secrets_info.files %}
+{% set secrets_rotation = secrets_info.rotation_timestamp %}
 services:
 {% for svc in services_list %}
   {%- set svc_user = svc.user if svc.user is defined else compose_user_default %}
@@ -133,36 +131,28 @@ services:
 {% endfor %}
 {% endif %}
 {% set inline_env = svc.env | default([]) %}
-
-{% set environment_ns = namespace(items=[], names=[]) %}
-
+{% set env_extras = [] %}
 {% if connections_per_second and svc.name == primary_service_name %}
-  {% set inline_env = inline_env + [{'name': 'CONNECTIONS_PER_SECOND', 'value': connections_per_second | string}] %}
+  {% set _ = env_extras.append({'name': 'CONNECTIONS_PER_SECOND', 'value': connections_per_second | string}) %}
 {% endif %}
-  {% for item in inline_env %}
-    {% if item.name not in environment_ns.names %}
-      {% set _ = environment_ns.items.append({'name': item.name, 'value': item.value}) %}
-      {% set _ = environment_ns.names.append(item.name) %}
-    {% endif %}
-  {% endfor %}
-  {% if secrets is defined and secrets.rotation_timestamp is defined and secrets.rotation_timestamp is not none %}
-    {% if 'SHMA_SECRETS_ROTATION' not in environment_ns.names %}
-      {% set _ = environment_ns.items.append({'name': 'SHMA_SECRETS_ROTATION', 'value': secrets.rotation_timestamp}) %}
-      {% set _ = environment_ns.names.append('SHMA_SECRETS_ROTATION') %}
-    {% endif %}
+{% if secrets_rotation is not none %}
+  {% set _ = env_extras.append({'name': 'SHMA_SECRETS_ROTATION', 'value': secrets_rotation}) %}
+{% endif %}
+{% set env_data = inline_env | merge_environment(env_extras) %}
+{% set env_items = env_data.items %}
+{% set env_names = env_data.names %}
+{% for secret_item in svc_secret_env %}
+  {% if secret_item.name not in env_names %}
+    {% set _ = env_items.append({'name': secret_item.name, 'value': '${' ~ secret_item.name ~ '}'}) %}
+    {% set _ = env_names.append(secret_item.name) %}
   {% endif %}
-  {% for secret_item in svc_secret_env %}
-    {% if secret_item.name not in environment_ns.names %}
-      {% set _ = environment_ns.items.append({'name': secret_item.name, 'value': '${' ~ secret_item.name ~ '}'}) %}
-      {% set _ = environment_ns.names.append(secret_item.name) %}
-    {% endif %}
-  {% endfor %}
-  {% if environment_ns.items %}
+{% endfor %}
+{% if env_items %}
     environment:
-  {% for env_item in environment_ns.items %}
+{% for env_item in env_items %}
       {{ env_item.name }}: {{ env_item.value }}
-  {% endfor %}
-  {% endif %}
+{% endfor %}
+{% endif %}
   {% if svc.entrypoint is defined %}
     entrypoint: {{ svc.entrypoint if svc.entrypoint is string else svc.entrypoint | to_json }}
 {% endif %}
@@ -225,14 +215,15 @@ services:
     deploy:
 {{ svc.deploy | to_nice_yaml(indent=6) | indent(6) }}
 {% endif %}
-{% set svc_health = svc.health if svc.health is defined else (health if loop.first and health is defined else None) %}
-{% if svc_health is not none %}
+{% set svc_health_source = svc.health if svc.health is defined else (health if loop.first and health is defined else None) %}
+{% if svc_health_source is not none %}
+  {% set svc_health = svc_health_source | normalize_health %}
     healthcheck:
-      test: {{ svc_health.cmd | default(['true']) | to_json }}
-      interval: {{ svc_health.interval | default('10s') }}
-      timeout: {{ svc_health.timeout | default('5s') }}
-      retries: {{ svc_health.retries | default(3) }}
-{% if svc_health.start_period is defined %}
+      test: {{ svc_health.command | to_json }}
+      interval: {{ svc_health.interval }}
+      timeout: {{ svc_health.timeout }}
+      retries: {{ svc_health.retries }}
+{% if svc_health.start_period is not none %}
       start_period: {{ svc_health.start_period }}
 {% endif %}
 {% endif %}

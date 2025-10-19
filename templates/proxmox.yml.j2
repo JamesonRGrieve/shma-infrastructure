@@ -6,16 +6,12 @@
 {% set cmd_list = service_commands | default([]) %}
 {% set mounts_config = mounts | default({}) %}
 {% set ephemeral_mounts = mounts_config.ephemeral_mounts | default([]) %}
-{% set default_apply_targets = ['docker', 'podman', 'kubernetes', 'proxmox', 'baremetal'] %}
 {% set proxmox_tmpfs = namespace(items=[]) %}
-{% for mount in ephemeral_mounts %}
-  {% set apply_targets = mount.apply_to | default(default_apply_targets) %}
-  {% if 'proxmox' in apply_targets %}
-    {% set options = [] %}
-    {% if mount.mode is defined %}{% set _ = options.append('mode=' ~ mount.mode) %}{% endif %}
-    {% if mount.size is defined %}{% set _ = options.append('size=' ~ mount.size) %}{% endif %}
-    {% set _ = proxmox_tmpfs.items.append({'path': mount.path, 'options': options}) %}
-  {% endif %}
+{% for mount in ephemeral_mounts | select_mounts('proxmox') %}
+  {% set options = [] %}
+  {% if mount.mode is defined %}{% set _ = options.append('mode=' ~ mount.mode) %}{% endif %}
+  {% if mount.size is defined %}{% set _ = options.append('size=' ~ mount.size) %}{% endif %}
+  {% set _ = proxmox_tmpfs.items.append({'path': mount.path, 'options': options}) %}
 {% endfor %}
 {% set pkg_names = namespace(items=[]) %}
 {% for pkg in pkg_list %}
