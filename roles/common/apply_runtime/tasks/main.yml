@@ -1,20 +1,36 @@
 ---
-- name: Execute runtime-specific deployment
-  include_tasks: "{{ runtime }}.yml"
+- name: Apply runtime with rollback support
+  block:
+    - name: Execute runtime-specific deployment
+      include_tasks: "{{ runtime }}.yml"
 
-- name: Health check after deployment
-  vars:
-    apply_runtime_health_command: {{ health | health_command }}
-  command: "{{ apply_runtime_health_command[0] }}"
-  args:
-    argv: {{ apply_runtime_health_command }}
-  delegate_to: "{{ service_ip | default(ansible_default_ipv4.address) }}"
-  retries: {{ health.retries | default(3) }}
-  delay: {{ health.interval | default('10s') | regex_replace('s$', '') | int }}
-  register: health_result
-  until: health_result.rc == 0
-  when: health is defined
+    - name: Health check after deployment
+      vars:
+        apply_runtime_health_command: {{ health | health_command }}
+      command: "{{ apply_runtime_health_command[0] }}"
+      args:
+        argv: {{ apply_runtime_health_command }}
+      delegate_to: "{{ service_ip | default(ansible_default_ipv4.address) }}"
+      retries: {{ health.retries | default(3) }}
+      delay: {{ health.interval | default('10s') | regex_replace('s$', '') | int }}
+      register: health_result
+      until: health_result.rc == 0
+      when: health is defined
 
-- name: Deployment complete
-  debug:
-    msg: "✓ Service {{ service_id }} deployed successfully on {{ runtime }}"
+    - name: Deployment complete
+      debug:
+        msg: "✓ Service {{ service_id }} deployed successfully on {{ runtime }}"
+  rescue:
+    - name: Check for runtime rollback tasks
+      stat:
+        path: "{{ role_path }}/tasks/rollback/{{ runtime }}.yml"
+      register: apply_runtime_rollback_stat
+
+    - name: Execute runtime rollback
+      include_tasks: "rollback/{{ runtime }}.yml"
+      when: apply_runtime_rollback_stat.stat.exists
+
+    - name: Deployment failed after rollback attempt
+      fail:
+        msg: >-
+          Deployment for {{ runtime }} runtime failed: {{ ansible_failed_result.msg | default(ansible_failed_result) }}

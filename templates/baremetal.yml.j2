@@ -4,6 +4,7 @@
 {% set service_section = unit.service | default({'Type': 'simple', 'ExecStart': '/usr/bin/true'}) %}
 {% set install_targets = unit.install_wanted_by | default(['multi-user.target']) %}
 {% set security = service_security | default({}) %}
+{% set restart_config = service_restart | default({}) %}
 {% set mounts_config = mounts | default({}) %}
 {% set ephemeral_mounts = mounts_config.ephemeral_mounts | default([]) %}
 {% set default_apply_targets = ['docker', 'podman', 'kubernetes', 'proxmox', 'baremetal'] %}
@@ -17,24 +18,25 @@
     {% set _ = baremetal_tmpfs.items.append({'path': mount.path, 'options': options}) %}
   {% endif %}
 {% endfor %}
+{% macro systemd_toggle(value, true_value='yes', false_value='no') -%}
+  {%- if value is boolean -%}
+    {{ true_value if value else false_value }}
+  {%- else -%}
+    {{ value }}
+  {%- endif -%}
+{%- endmacro %}
 {% set read_only_root = security.read_only_root_filesystem if security.read_only_root_filesystem is defined else true %}
 {% set private_tmp_default = security.private_tmp if security.private_tmp is defined else true %}
 {% set protect_system_default = security.protect_system if security.protect_system is defined else (read_only_root | ternary('strict', 'full')) %}
 {% set protect_home_default = security.protect_home if security.protect_home is defined else 'yes' %}
-{% if protect_home_default is boolean %}
-  {% set protect_home_value = protect_home_default | ternary('yes', 'no') %}
+{% set protect_home_value = systemd_toggle(protect_home_default, 'yes', 'no') %}
+{% set private_tmp_value = systemd_toggle(private_tmp_default, 'yes', 'no') %}
+{% set protect_system_value = systemd_toggle(protect_system_default, 'strict', 'no') %}
+{% set system_call_filter = security.system_call_filter if security.system_call_filter is defined else none %}
+{% if system_call_filter is sequence and system_call_filter is not string %}
+  {% set system_call_filter_value = system_call_filter | map('string') | join(' ') %}
 {% else %}
-  {% set protect_home_value = protect_home_default %}
-{% endif %}
-{% if private_tmp_default is boolean %}
-  {% set private_tmp_value = private_tmp_default | ternary('yes', 'no') %}
-{% else %}
-  {% set private_tmp_value = private_tmp_default %}
-{% endif %}
-{% if protect_system_default is boolean %}
-  {% set protect_system_value = protect_system_default | ternary('strict', 'no') %}
-{% else %}
-  {% set protect_system_value = protect_system_default %}
+  {% set system_call_filter_value = system_call_filter %}
 {% endif %}
 
 [Unit]
@@ -56,6 +58,31 @@ ProtectSystem={{ protect_system_value }}
 {% if 'ProtectHome' not in service_section %}
 ProtectHome={{ protect_home_value }}
 {% endif %}
+{% if system_call_filter_value %}
+  {% if 'SystemCallFilter' not in service_section %}
+SystemCallFilter={{ system_call_filter_value }}
+  {% endif %}
+{% endif %}
+{% set restart_directives = [
+  ('Restart', restart_config.restart if restart_config.restart is defined else none),
+  ('RestartSec', restart_config.restart_sec if restart_config.restart_sec is defined else none),
+  ('RestartMaxDelaySec', restart_config.restart_max_delay_sec if restart_config.restart_max_delay_sec is defined else none),
+  ('RestartTimeoutSec', restart_config.restart_timeout_sec if restart_config.restart_timeout_sec is defined else none),
+  ('RestartPreventExitStatus', restart_config.restart_prevent_exit_status if restart_config.restart_prevent_exit_status is defined else none),
+  ('RestartForceExitStatus', restart_config.restart_force_exit_status if restart_config.restart_force_exit_status is defined else none),
+  ('StartLimitIntervalSec', restart_config.start_limit_interval_sec if restart_config.start_limit_interval_sec is defined else none),
+  ('StartLimitBurst', restart_config.start_limit_burst if restart_config.start_limit_burst is defined else none),
+  ('StartLimitAction', restart_config.start_limit_action if restart_config.start_limit_action is defined else none)
+] %}
+{% for directive, value in restart_directives %}
+  {% if value is not none and directive not in service_section %}
+    {% if value is sequence and value is not string %}
+{{ directive }}={{ value | join(' ') }}
+    {% else %}
+{{ directive }}={{ value }}
+    {% endif %}
+  {% endif %}
+{% endfor %}
 {% if baremetal_tmpfs.items %}
 {% for mount in baremetal_tmpfs.items %}
 TemporaryFileSystem={{ mount.path }}{% if mount.options %}:{{ mount.options | join(',') }}{% endif %}

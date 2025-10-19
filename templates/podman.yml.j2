@@ -16,19 +16,31 @@
 {% set no_new_privs = shma_security_defaults.no_new_privileges %}
 {% set bounding_set = shma_security_defaults.capability_bounding_set %}
 {% set tmpfs_hardening_flags = ['nosuid', 'nodev', 'noexec'] %}
-{% set podman_tmpfs = namespace(items=[]) %}
+{% set podman_tmpfs = namespace(entries=[]) %}
 {% for mount in ephemeral_mounts %}
   {% set apply_targets = mount.apply_to | default(default_apply_targets) %}
   {% if 'podman' in apply_targets %}
-    {% set options = [] %}
-    {% for flag in tmpfs_hardening_flags %}
-      {% if flag not in options %}{% set _ = options.append(flag) %}{% endif %}
+    {% set existing = none %}
+    {% for item in podman_tmpfs.entries %}
+      {% if item.path == mount.path %}
+        {% set existing = item %}
+      {% endif %}
     {% endfor %}
-    {% if mount.size is defined %}{% set _ = options.append('size=' ~ mount.size) %}{% endif %}
-    {% if mount.mode is defined %}{% set _ = options.append('mode=' ~ mount.mode) %}{% endif %}
-    {% set entry = mount.path %}
-    {% if options %}{% set entry = entry ~ ':' ~ options | join(',') %}{% endif %}
-    {% if entry not in podman_tmpfs.items %}{% set _ = podman_tmpfs.items.append(entry) %}{% endif %}
+    {% if existing is none %}
+      {% set existing = namespace(path=mount.path, options=[]) %}
+      {% set _ = podman_tmpfs.entries.append(existing) %}
+    {% endif %}
+    {% for flag in tmpfs_hardening_flags %}
+      {% if flag not in existing.options %}{% set _ = existing.options.append(flag) %}{% endif %}
+    {% endfor %}
+    {% if mount.size is defined %}
+      {% set size_flag = 'size=' ~ mount.size %}
+      {% if size_flag not in existing.options %}{% set _ = existing.options.append(size_flag) %}{% endif %}
+    {% endif %}
+    {% if mount.mode is defined %}
+      {% set mode_flag = 'mode=' ~ mount.mode %}
+      {% if mode_flag not in existing.options %}{% set _ = existing.options.append(mode_flag) %}{% endif %}
+    {% endif %}
   {% endif %}
 {% endfor %}
 {% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] %}
@@ -46,13 +58,14 @@
 {% set inline_env = service_env | default([]) %}
 {% set inline_env_names = inline_env | map(attribute='name') | list %}
 {% set resources = service_resources | default({}) %}
+{% set user_namespace = security.user_namespace if security.user_namespace is defined else none %}
 {% if resources.connections_per_second is defined %}
   {% set inline_env = inline_env + [{'name': 'CONNECTIONS_PER_SECOND', 'value': resources.connections_per_second | string}] %}
 {% endif %}
 {% set auto_update_mode = quadlet_auto_update | default('none') %}
 {% set health_cmd = health | health_command %}
 [Unit]
-Description={{ service_unit_description | default('Managed container for ' ~ (service_name | default(service_id))) }}
+Description={{ unit_description }}
 After=network-online.target
 Wants=network-online.target
 
@@ -66,6 +79,9 @@ NoNewPrivileges={{ 'true' if no_new_privs else 'false' }}
 {% for cap in drop_caps_default %}
 DropCapability={{ cap }}
 {% endfor %}
+{% if user_namespace is not none and (user_namespace | string) | length > 0 %}
+UserNS={{ user_namespace }}
+{% endif %}
 {% for env in inline_env %}
 Environment={{ env.name }}={{ env.value }}
 {% endfor %}
@@ -85,8 +101,10 @@ Volume={{ vol.source | default(vol.name) }}.volume:{{ vol.target }}:{% if vol.mo
 {% for secret in file_secrets %}
 Volume={{ secret_dir }}/{{ secret.name }}:{{ secret.target | default('/run/secrets/' ~ secret.name) }}:ro,Z
 {% endfor %}
-{% for entry in podman_tmpfs.items %}
-Tmpfs={{ entry }}
+{% for entry in podman_tmpfs.entries %}
+{% set tmpfs_value = entry.path %}
+{% if entry.options %}{% set tmpfs_value = tmpfs_value ~ ':' ~ entry.options | join(',') %}{% endif %}
+Tmpfs={{ tmpfs_value }}
 {% endfor %}
 {% for port in ports %}
 PublishPort={{ port.host_ip | default('') }}{% if port.host_ip is defined and port.host_ip | string | length > 0 %}:{% endif %}{{ port.published | default(port.target) }}:{{ port.target }}{% if port.protocol is defined %}/{{ port.protocol }}{% endif %}
@@ -102,8 +120,6 @@ TimeoutStartSec=900
 NoNewPrivileges={{ 'yes' if no_new_privs else 'no' }}
 {% if bounding_set %}
 CapabilityBoundingSet={{ bounding_set | join(' ') }}
-{% else %}
-CapabilityBoundingSet=
 {% endif %}
 
 [Install]

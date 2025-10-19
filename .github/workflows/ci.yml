@@ -46,7 +46,7 @@ jobs:
         uses: actions/cache@13dac90522f915087a5de3c972d4d68512c964b0
         with:
           path: ~/.cache/ci-tools
-          key: ${{ runner.os }}-ci-tools-${{ hashFiles('ci/tool_versions.yml') }}
+          key: ${{ runner.os }}-ci-tools-${{ hashFiles('ci/version_matrix.yml') }}
           restore-keys: |
             ${{ runner.os }}-ci-tools-
 
@@ -200,7 +200,7 @@ jobs:
         uses: actions/cache@13dac90522f915087a5de3c972d4d68512c964b0
         with:
           path: ~/.cache/ci-tools
-          key: ${{ runner.os }}-ci-tools-${{ hashFiles('ci/tool_versions.yml') }}
+          key: ${{ runner.os }}-ci-tools-${{ hashFiles('ci/version_matrix.yml') }}
           restore-keys: |
             ${{ runner.os }}-ci-tools-
 
@@ -296,7 +296,7 @@ jobs:
         uses: actions/cache@13dac90522f915087a5de3c972d4d68512c964b0
         with:
           path: ~/.cache/ci-tools
-          key: ${{ runner.os }}-ci-tools-${{ hashFiles('ci/tool_versions.yml') }}
+          key: ${{ runner.os }}-ci-tools-${{ hashFiles('ci/version_matrix.yml') }}
           restore-keys: |
             ${{ runner.os }}-ci-tools-
 

@@ -9,6 +9,8 @@ Deploy services directly on bare-metal or virtual machines with idempotent confi
 - Generated units inherit defaults from `templates/baremetal.yml.j2`, keeping runtime-agnostic settings consistent.
 - `mounts.ephemeral_mounts` entries render `TemporaryFileSystem=` directives so only the declared paths stay writable at runtime.
 - systemd units enable `PrivateTmp=yes`, `ProtectSystem=strict`, and `ProtectHome=yes` by default (unless overridden via `service_security`) to harden the host.
+- Optional restart policies (`service_restart`) add directives such as `RestartSec=` without overriding explicit unit overrides.
+- `service_security.system_call_filter` renders `SystemCallFilter=` for additional system call hardening.
 
 ## Prerequisites
 

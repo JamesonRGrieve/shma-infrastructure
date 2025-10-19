@@ -101,7 +101,9 @@ line up without additional post-processing.
 
 1. Render the template (see `tests/render.yml`).
 2. `roles/common/apply_runtime/tasks/proxmox.yml`:
+   - Validates API credentials against the cluster before provisioning.
    - Creates or updates the container with the declared features.
+   - Cleans up any partially created container if provisioning fails.
    - Waits for SSH on `container_ip:22`.
    - Installs packages via non-interactive APT when requested.
    - Copies configuration files and enables systemd services declared in `setup.services`.
@@ -116,6 +118,7 @@ line up without additional post-processing.
 - LXC manifests stay unprivileged and avoid nested containers unless `service_security.allow_privilege_escalation: true` (or `service_security.no_new_privileges: false`) signals that the workload needs additional privileges.
 - Declare tmpfs-backed paths through `mounts.ephemeral_mounts` so only those directories remain writable at runtime.
 - Prefer API tokens with only the `vms:read`/`vms:write` and `nodes:read` permissions the playbook needs. Bind them to the specific node or pool that hosts the managed LXCs instead of granting full-cluster rights.
+- Override `proxmox_api_use_https`, `proxmox_api_port`, `proxmox_validate_certs`, and `proxmox_api_timeout` when your cluster uses non-standard connectivity. Set `proxmox_hide_sensitive: false` temporarily if you must debug API failures, but re-enable it to keep credentials out of logs.
 
 ## Troubleshooting
 

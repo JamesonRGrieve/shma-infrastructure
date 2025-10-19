@@ -173,19 +173,54 @@
   ansible.builtin.command: aide --init
   args:
     creates: "{{ hardening_aide_new_db_path }}"
-  register: aide_init_redhat
-  changed_when: aide_init_redhat.rc == 0
+  async: "{{ hardening_aide_init_timeout if hardening_use_async_aide else omit }}"
+  poll: "{{ 0 if hardening_use_async_aide else omit }}"
+  register: aide_init_redhat_start
   when:
     - ansible_facts.packages.get('aide') is defined
     - not hardening_aide_db.stat.exists
+
+- name: Wait for AIDE initialization to finish on Red Hat hosts
+  ansible.builtin.async_status:
+    jid: "{{ aide_init_redhat_start.ansible_job_id }}"
+  register: aide_init_redhat_result
+  until: aide_init_redhat_result.finished
+  retries: "{{ hardening_aide_async_retries | int }}"
+  delay: "{{ hardening_aide_async_poll_interval | int }}"
+  when:
+    - ansible_facts.packages.get('aide') is defined
+    - not hardening_aide_db.stat.exists
+    - hardening_use_async_aide
+    - aide_init_redhat_start.ansible_job_id is defined
+  failed_when: >-
+    aide_init_redhat_result.finished and (aide_init_redhat_result.rc | default(0)) != 0
+  changed_when: >-
+    aide_init_redhat_result.finished and (aide_init_redhat_result.rc | default(0)) == 0
+
+- name: Capture synchronous AIDE initialization result on Red Hat hosts
+  ansible.builtin.set_fact:
+    aide_init_redhat: "{{ aide_init_redhat_start }}"
+  when:
+    - ansible_facts.packages.get('aide') is defined
+    - aide_init_redhat_start is defined
+    - (not hardening_use_async_aide) or (aide_init_redhat_start.ansible_job_id is not defined)
+
+- name: Capture asynchronous AIDE initialization result on Red Hat hosts
+  ansible.builtin.set_fact:
+    aide_init_redhat: "{{ aide_init_redhat_result }}"
+  when:
+    - ansible_facts.packages.get('aide') is defined
+    - hardening_use_async_aide
+    - aide_init_redhat_result is defined
+    - aide_init_redhat_start.ansible_job_id is defined
 
 - name: Promote initialized AIDE database
   ansible.builtin.command: "mv {{ hardening_aide_new_db_path }} {{ hardening_aide_db_path }}"
   when:
     - ansible_facts.packages.get('aide') is defined
     - aide_init_redhat is defined
-    - aide_init_redhat.rc == 0
-    - aide_init_redhat is changed
+    - (aide_init_redhat.rc | default(0)) == 0
+    - aide_init_redhat.changed | default(false)
 
 - name: Record AIDE database initialization on Red Hat hosts
   ansible.builtin.set_fact:
@@ -195,4 +230,4 @@
   when:
     - ansible_facts.packages.get('aide') is defined
     - aide_init_redhat is defined
-    - aide_init_redhat.rc == 0
+    - (aide_init_redhat.rc | default(0)) == 0
