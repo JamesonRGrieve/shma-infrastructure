@@ -3,11 +3,11 @@ service_name: sample-service
 service_unit_name: sample-service
 service_image: docker.io/library/nginx@sha256:2ed85f18cb2c6b49e191bcb6bf12c0c07d63f3937a05d9f5234170d4f8df5c94
 version: "1.27.0"
-service_ip: 192.0.2.50
+service_ip: &service_ip 192.0.2.50
 service_ports:
   - target: 8080
     published: 8080
-    host_ip: 192.0.2.50
+    host_ip: *service_ip
 service_env:
   - name: APP_MODE
     value: production
@@ -21,36 +21,35 @@ service_volumes:
     driver: local
 service_packages:
   - nginx
+  - curl
 service_files:
   - path: /etc/sample-service/runtime.env
     mode: '0640'
-    content: |
-      APP_MODE=production
-      APP_FEATURE_FLAG=true
+    content: "{{ service_env | render_env_file }}"
 service_services:
   - name: sample-service
     enabled: true
     state: started
 service_commands:
   - /usr/bin/true
-service_resources:
-  memory_mb: 512
-  cpu_cores: 1
+service_resources: &service_resources
+  memory_mb: &service_memory 512
+  cpu_cores: &service_cores 1
 service_namespace: sample
 service_replicas: 1
-service_storage_gb: 5
-service_gateway: 192.0.2.1
+service_storage_gb: &service_storage 5
+service_gateway: &service_gateway 192.0.2.1
 service_container:
   vmid: 200
   hostname: sample-service
   ostemplate: local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst
-  disk: 5
-  cores: 1
-  memory: 512
+  disk: *service_storage
+  cores: *service_cores
+  memory: *service_memory
   swap: 512
   bridge: vmbr0
   cidr: 24
-  gateway: 192.0.2.1
+  gateway: *service_gateway
   interface: eth0
   onboot: yes
   unprivileged: yes
@@ -76,9 +75,10 @@ mounts:
       size: 64Mi
 health:
   cmd:
-    - /bin/sh
+    - /usr/bin/env
+    - bash
     - -c
-    - "exit 0"
+    - "curl --fail --silent http://127.0.0.1:8080/healthz"
   interval: 10s
   timeout: 5s
   retries: 3
@@ -93,9 +93,9 @@ secrets:
   items:
     - name: SAMPLE_SERVICE_TOKEN
       type: env
-      value: super-secret-token
+      value: "{{ vault_sample_service_token }}"
     - name: tls-cert
       type: file
-      content: "-----BEGIN CERTIFICATE-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtestcertificate\n-----END CERTIFICATE-----"
+      content: "{{ vault_sample_service_tls_cert }}"
       target: /etc/sample-service/certs/tls.crt
       mode: '0400'

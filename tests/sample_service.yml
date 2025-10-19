@@ -3,11 +3,11 @@ service_name: sample-service
 service_unit_name: sample-service
 service_image: docker.io/library/nginx@sha256:2ed85f18cb2c6b49e191bcb6bf12c0c07d63f3937a05d9f5234170d4f8df5c94
 version: "1.27.0"
-service_ip: 10.23.45.50
+service_ip: &service_ip 10.23.45.50
 service_ports:
   - target: 8080
     published: 8080
-    host_ip: 10.23.45.50
+    host_ip: *service_ip
 service_env:
   - name: APP_MODE
     value: production
@@ -21,37 +21,36 @@ service_volumes:
     target: /etc/sample-service
 service_packages:
   - nginx
+  - curl
 service_files:
   - path: /etc/sample-service/runtime.env
     mode: '0640'
-    content: |
-      APP_MODE=production
-      APP_FEATURE_FLAG=true
+    content: "{{ service_env | render_env_file }}"
 service_services:
   - name: sample-service
     enabled: true
     state: started
 service_commands:
   - /usr/bin/true
-service_resources:
-  memory_mb: 512
-  cpu_cores: 1
+service_resources: &service_resources
+  memory_mb: &service_memory 512
+  cpu_cores: &service_cores 1
   connections_per_second: 200
 service_namespace: sample
 service_replicas: 1
-service_storage_gb: 5
-service_gateway: 10.23.45.1
+service_storage_gb: &service_storage 5
+service_gateway: &service_gateway 10.23.45.1
 service_container:
   vmid: 200
   hostname: sample-service
   ostemplate: local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst
-  disk: 5
-  cores: 1
-  memory: 512
+  disk: *service_storage
+  cores: *service_cores
+  memory: *service_memory
   swap: 512
   bridge: vmbr0
   cidr: 24
-  gateway: 10.23.45.1
+  gateway: *service_gateway
   interface: eth0
   onboot: yes
   unprivileged: yes
@@ -77,9 +76,10 @@ mounts:
       size: 64Mi
 health:
   cmd:
-    - /bin/sh
+    - /usr/bin/env
+    - bash
     - -c
-    - "exit 0"
+    - "curl --fail --silent http://127.0.0.1:8080/healthz"
   interval: 10s
   timeout: 5s
   retries: 3
@@ -95,31 +95,9 @@ secrets:
   items:
     - name: SAMPLE_SERVICE_TOKEN
       type: env
-      value: super-secret-token
+      value: "{{ vault_sample_service_token }}"
     - name: tls-cert
       type: file
-      content: |
-        -----BEGIN CERTIFICATE-----
-        MIIDdzCCAl+gAwIBAgIEbPOjhzANBgkqhkiG9w0BAQsFADBvMQswCQYDVQQGEwJVUzEQ
-        MA4GA1UECBMHQXJpem9uYTEPMA0GA1UEBxMGVG9ycmVzMRQwEgYDVQQKEwtFeGFtcGxl
-        IEluYzEYMBYGA1UECxMPQ2VydGlmaWNhdGlvbiBJVDEUMBIGA1UEAxMLZXhhbXBsZS5j
-        b20wHhcNMjAwMTAxMDAwMDAwWhcNMzAwMTAxMDAwMDAwWjBvMQswCQYDVQQGEwJVUzEQ
-        MA4GA1UECBMHQXJpem9uYTEPMA0GA1UEBxMGVG9ycmVzMRQwEgYDVQQKEwtFeGFtcGxl
-        IEluYzEYMBYGA1UECxMPQ2VydGlmaWNhdGlvbiBJVDEUMBIGA1UEAxMLZXhhbXBsZS5j
-        b20wggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQCqW6zGyF/F7fs/3Gzdh0dX
-        8GZFOD9oTiFqL7fyqCkCmZJLdnOjFkMrDXLI4YAlnXrhIRbkIuAeGHNirMRHkRkNvztN
-        FVQVw1Gc7YCOUMIqFZ3VAb9YSEuxsjjlHzvEihQ/HUkNzxaz2YsmiVjCwXTlzAIXazhb
-        ugzuDUFcPRl1b/HFB70dNDO7xjMnIKPQ4j/wcgUp3NEPoPFcAckU4iigFsMghvYDn8Ap
-        X2HFqRSbVSSMzdg3NofM8JrIoYNewc19hXtOD87mpy4V/mQJu1WDVYj1WFJsbgx5caX5
-        /C/PObbIVdQydb9h9NP7VDaRao7IhiHBpjz2uVH54camzatoNgtrENAgMBAAGjUzBRMB
-        0GA1UdDgQWBBQELyhl725LLANiRb114F8CbnMDtTAfBgNVHSMEGDAWgBQELyhl725LLA
-        NiRb114F8CbnMDtTAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUAA4IBAQBrZE
-        cD3xKhsR4HIX66D+QP9enZ5bY3bT5iAG2wE8xmPKzW0fvkYlEYwH14r2raXIiQunlslq
-        Y5T2r8j04YfGLwRoTSesFiNUFDXL9uBeb5GsyhQOdE31E4n4t4tPcNI0YvrFica8FWHQ
-        rQQizxgxYkWwaRM42gnikIze8ih/7gToYtL6vhfVqlhK/SXxPxq8np5xpoE2mR7Bfrps
-        bR9f7D78Dveoxu48UUfZo0fo0RKZ77N8BINU3CFAaj6MqFmoVoeAQMtk0iA0WIMRqjYO
-        EoTP0TO+GfY+3CX6X1cxZV8oPZxC25f6/sOlne342XQI3/OQv0svBLnBxGZ+rsoAhH2m
-        6q+UpBA
-        -----END CERTIFICATE-----
+      content: "{{ vault_sample_service_tls_cert }}"
       target: /etc/sample-service/certs/tls.crt
       mode: '0400'

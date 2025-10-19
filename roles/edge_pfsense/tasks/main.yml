@@ -12,57 +12,21 @@
       - "'global' not in (pfsense_api_token | lower)"
     fail_msg: "pfsense_api_token must be scoped to the HAProxy API instead of root/global access"
 
-- name: Initialize pfSense payload containers
+- name: Build pfSense HAProxy payloads
   set_fact:
-    pfsense_backends: []
-    pfsense_frontends: []
+    pfsense_haproxy_payloads: >-
+      {{ haproxy_payloads(
+           edge_ingress_backends | default([]),
+           pfsense_ingress_bind_addresses | default([]),
+           provider='pfsense',
+           certificate_ref=pfsense_tls_cert_ref
+         )
+      }}
 
-- name: Build pfSense backend payloads
+- name: Extract pfSense backend and frontend payloads
   set_fact:
-    pfsense_backends: "{{ pfsense_backends + [ backend_payload ] }}"
-  loop: "{{ edge_ingress_backends | default([]) }}"
-  loop_control:
-    loop_var: edge_backend
-  vars:
-    backend_payload: >-
-      {{ {
-        'name': edge_backend.service_id,
-        'balance': 'roundrobin',
-        'health_check_enabled': True,
-        'health_check_method': 'GET',
-        'health_check_path': edge_backend.path_prefix if edge_backend.path_prefix != '/' else '/',
-        'servers': [
-          {
-            'name': edge_backend.service_id + '-primary',
-            'address': edge_backend.exports.APP_BACKEND_IP,
-            'port': edge_backend.exports.APP_PORT,
-            'ssl': edge_backend.scheme == 'https'
-          }
-        ]
-      } | to_json | from_json }}
-
-- name: Build pfSense frontend payloads
-  set_fact:
-    pfsense_frontends: "{{ pfsense_frontends + [ frontend_payload ] }}"
-  loop: "{{ edge_ingress_backends | default([]) }}"
-  loop_control:
-    loop_var: edge_backend
-  vars:
-    frontend_payload: >-
-      {{ {
-        'name': edge_backend.router_name,
-        'listen_addresses': [
-          {
-            'address': bind.address | string,
-            'port': bind.port | string,
-            'ssl': bind.tls
-          } for bind in pfsense_ingress_bind_addresses
-        ],
-        'rules': ([{'type': 'host', 'value': edge_backend.exports.APP_FQDN}] + ([{'type': 'path_beg', 'value': edge_backend.path_prefix}] if edge_backend.path_prefix != '/' else [])),
-        'default_backend': edge_backend.service_id,
-        'tls_enabled': edge_backend.tls,
-        'tls_certificate_ref': pfsense_tls_cert_ref if pfsense_tls_cert_ref else ''
-      } | to_json | from_json }}
+    pfsense_backends: "{{ pfsense_haproxy_payloads.backends }}"
+    pfsense_frontends: "{{ pfsense_haproxy_payloads.frontends }}"
 
 - name: Push HAProxy configuration to pfSense
   uri:

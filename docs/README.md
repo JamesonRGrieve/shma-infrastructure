@@ -64,11 +64,11 @@ A minimal example using the bundled `sample_service.yml` looks like:
 ```yaml
 service_id: sample-service
 runtime_templates:
-  docker: templates/docker.yml.j2
-  podman: templates/podman.yml.j2
-  proxmox: templates/proxmox.yml.j2
-  kubernetes: templates/kubernetes.yml.j2
-  baremetal: templates/baremetal.yml.j2
+  docker: ../templates/docker.yml.j2
+  podman: ../templates/podman.yml.j2
+  proxmox: ../templates/proxmox.yml.j2
+  kubernetes: ../templates/kubernetes.yml.j2
+  baremetal: ../templates/baremetal.yml.j2
 
 service_volumes:
   - name: config
