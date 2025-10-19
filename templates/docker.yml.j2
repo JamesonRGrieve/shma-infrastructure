@@ -181,6 +181,9 @@ services:
 {% endif %}
 {% set ports = svc.ports | default([]) %}
 {% if ports %}
+{% if service_ports is defined and service_ports is not none and service_ports | length > 0 %}
+    x-shma-service-ports: true
+{% endif %}
     ports:
 {% for port in ports %}
       - "{{ port.host_ip | default('') }}{% if port.host_ip is defined and port.host_ip | string | length > 0 %}:{% endif %}{{ port.published | default(port.target) }}:{{ port.target }}{% if port.protocol is defined %}/{{ port.protocol }}{% endif %}"

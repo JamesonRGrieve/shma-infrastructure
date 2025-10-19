@@ -24,9 +24,10 @@ def gather_secret_values(service: dict) -> set[str]:
             secrets.add(str(value))
 
     for item in secret_block.get("files", []) or []:
-        value = item.get("value")
-        if value:
-            secrets.add(str(value))
+        for field in ("value", "content"):
+            value = item.get(field)
+            if value:
+                secrets.add(str(value))
 
     return secrets
 
@@ -41,9 +42,17 @@ def check_manifest(manifest_path: Path, secrets: set[str]) -> list[str]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Ensure rendered manifests do not contain inline secrets")
-    parser.add_argument("service_definition", type=Path, help="Service definition file used during rendering")
-    parser.add_argument("manifest", nargs="+", type=Path, help="Manifest files to inspect")
+    parser = argparse.ArgumentParser(
+        description="Ensure rendered manifests do not contain inline secrets"
+    )
+    parser.add_argument(
+        "service_definition",
+        type=Path,
+        help="Service definition file used during rendering",
+    )
+    parser.add_argument(
+        "manifest", nargs="+", type=Path, help="Manifest files to inspect"
+    )
     return parser
 
 
