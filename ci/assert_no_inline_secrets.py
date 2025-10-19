@@ -14,19 +14,29 @@ def load_yaml(path: Path) -> dict:
         raise ValueError(f"Failed to parse YAML file {path}: {exc}") from exc
 
 
+def _register_secret(secrets: set[str], raw_value: str | None) -> None:
+    if not raw_value:
+        return
+
+    text = str(raw_value)
+    if text:
+        secrets.add(text)
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped:
+                secrets.add(stripped)
+
+
 def gather_secret_values(service: dict) -> set[str]:
-    secrets = set()
+    secrets: set[str] = set()
     secret_block = service.get("secrets", {})
 
     for item in secret_block.get("env", []) or []:
-        value = item.get("value")
-        if value:
-            secrets.add(str(value))
+        _register_secret(secrets, item.get("value"))
 
     for item in secret_block.get("files", []) or []:
-        value = item.get("value")
-        if value:
-            secrets.add(str(value))
+        _register_secret(secrets, item.get("value"))
+        _register_secret(secrets, item.get("content"))
 
     return secrets
 
@@ -41,9 +51,17 @@ def check_manifest(manifest_path: Path, secrets: set[str]) -> list[str]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Ensure rendered manifests do not contain inline secrets")
-    parser.add_argument("service_definition", type=Path, help="Service definition file used during rendering")
-    parser.add_argument("manifest", nargs="+", type=Path, help="Manifest files to inspect")
+    parser = argparse.ArgumentParser(
+        description="Ensure rendered manifests do not contain inline secrets"
+    )
+    parser.add_argument(
+        "service_definition",
+        type=Path,
+        help="Service definition file used during rendering",
+    )
+    parser.add_argument(
+        "manifest", nargs="+", type=Path, help="Manifest files to inspect"
+    )
     return parser
 
 

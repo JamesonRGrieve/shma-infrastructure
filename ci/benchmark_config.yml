@@ -1,0 +1,9 @@
+{
+  "defaults": {
+    "max_render_seconds": 15.0,
+    "max_manifest_size_bytes": 524288,
+    "runtimes": ["docker", "podman", "kubernetes", "proxmox", "baremetal"]
+  },
+  "services": {},
+  "files": {}
+}

@@ -6,14 +6,20 @@ import json
 import re
 import subprocess
 import sys
-from typing import List
+from pathlib import Path
+from typing import Dict, List
 
-ALLOWED = {
-    "python": ("3.11.",),
-    "ansible": ("9.5.",),
-    "ansible_core": ("2.16.",),
-    "kubectl": ("v1.29.3", "v1.31.1"),
-}
+MATRIX_PATH = Path("ci/version_matrix.yml")
+
+
+def load_matrix() -> Dict[str, object]:
+    try:
+        return json.loads(MATRIX_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:  # pragma: no cover - defensive guard
+        raise RuntimeError(f"Failed to parse version matrix: {exc}") from exc
+
+
+MATRIX = load_matrix()
 
 
 def run_command(command: List[str]) -> subprocess.CompletedProcess[str]:
@@ -24,8 +30,9 @@ def run_command(command: List[str]) -> subprocess.CompletedProcess[str]:
 
 def check_python() -> List[str]:
     version = sys.version.split()[0]
-    if not version.startswith(ALLOWED["python"]):
-        return [f"Python {version} is outside the supported {ALLOWED['python']} range."]
+    expected_prefix = str(MATRIX["python"]["prefix"])
+    if not version.startswith(expected_prefix):
+        return [f"Python {version} is outside the supported {expected_prefix} range."]
     return []
 
 
@@ -46,9 +53,11 @@ def check_ansible() -> List[str]:
             errors.append("ansible package version could not be parsed.")
         else:
             version = version_match.group("version")
-            if not version.startswith(ALLOWED["ansible"]):
+            expected_prefix = str(MATRIX["ansible"]["package_prefix"])
+            if not version.startswith(expected_prefix):
                 errors.append(
-                    f"Ansible package {version} is outside the supported {ALLOWED['ansible']} range."
+                    "Ansible package "
+                    f"{version} is outside the supported {expected_prefix} range."
                 )
 
     try:
@@ -65,9 +74,11 @@ def check_ansible() -> List[str]:
             )
         else:
             version = match.group("version")
-            if not version.startswith(ALLOWED["ansible_core"]):
+            expected_prefix = str(MATRIX["ansible"]["core_prefix"])
+            if not version.startswith(expected_prefix):
                 errors.append(
-                    f"ansible-core {version} is outside the supported {ALLOWED['ansible_core']} range."
+                    "ansible-core "
+                    f"{version} is outside the supported {expected_prefix} range."
                 )
 
     return errors
@@ -96,9 +107,16 @@ def check_kubectl() -> List[str]:
         errors.append(
             "kubectl clientVersion.gitVersion was missing from the JSON payload."
         )
-    elif git_version not in ALLOWED["kubectl"]:
-        allowed = ", ".join(ALLOWED["kubectl"])
-        errors.append(f"kubectl {git_version} is outside the supported set: {allowed}.")
+    else:
+        allowed_versions = {
+            str(MATRIX["kubectl"]["stable"]),
+            str(MATRIX["kubectl"]["latest"]),
+        }
+        if git_version not in allowed_versions:
+            allowed = ", ".join(sorted(allowed_versions))
+            errors.append(
+                f"kubectl {git_version} is outside the supported set: {allowed}."
+            )
 
     return errors
 

@@ -17,7 +17,9 @@ def load_yaml(path: Path) -> dict:
         raise ValueError(f"Failed to parse YAML file {path}: {exc}") from exc
 
 
-def validate_manifest(manifest_path: Path, service_definition: Path | None = None) -> int:
+def validate_manifest(
+    manifest_path: Path, service_definition: Path | None = None
+) -> int:
     if not manifest_path.exists():
         print(f"Manifest not found: {manifest_path}", file=sys.stderr)
         return 1

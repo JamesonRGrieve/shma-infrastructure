@@ -1,0 +1,70 @@
+name: "Setup Python runtime and dependencies"
+description: "Checkout the repository, install Python, dependencies, and Ansible collections"
+inputs:
+  lane:
+    description: "Compatibility lane (stable/latest)"
+    required: true
+outputs:
+  python-version:
+    description: "Resolved Python version for the lane"
+    value: ${{ steps.versions.outputs.python_version }}
+  collection-file:
+    description: "Ansible collection requirement file for the lane"
+    value: ${{ steps.versions.outputs.collection_file }}
+  kubectl-version:
+    description: "kubectl version pinned for the lane"
+    value: ${{ steps.versions.outputs.kubectl_version }}
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout
+      uses: actions/checkout@b4ffde65f463d58a31b38cfa6d26b4f752063b9
+
+    - name: Load compatibility matrix
+      id: versions
+      shell: python
+      run: |
+        import json
+        import os
+        from pathlib import Path
+
+        lane = os.environ["INPUT_LANE"].strip()
+        matrix_path = Path("ci/version_matrix.yml")
+        matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+
+        python_version = str(matrix["python"]["version"])
+        kubectl_versions = matrix["kubectl"]
+        collections = matrix["collections"]
+
+        if lane not in kubectl_versions:
+          raise SystemExit(f"Lane '{lane}' is not defined for kubectl in {matrix_path}")
+        if lane not in collections:
+          raise SystemExit(f"Lane '{lane}' is not defined for collections in {matrix_path}")
+
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+          fh.write(f"python_version={python_version}\n")
+          fh.write(f"kubectl_version={kubectl_versions[lane]}\n")
+          fh.write(f"collection_file={collections[lane]}\n")
+
+    - name: Set up Python
+      uses: actions/setup-python@13f3840a65875556b0f1a6d6e5d79d993d3f5a6b
+      with:
+        python-version: ${{ steps.versions.outputs.python_version }}
+
+    - name: Cache pip
+      uses: actions/cache@13dac90522f915087a5de3c972d4d68512c964b0
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install Python dependencies
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        pip install --requirement requirements.txt
+
+    - name: Install Ansible collections
+      shell: bash
+      run: ansible-galaxy collection install -r ${{ steps.versions.outputs.collection_file }}
