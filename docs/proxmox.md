@@ -12,6 +12,7 @@ Deploy services as LXC containers on Proxmox VE with predictable networking and 
 - `mounts.ephemeral_mounts` entries render as systemd drop-ins (`TemporaryFileSystem=`) inside the guest so writable areas stay tmpfs backed.
 - A default `keyctl=0` feature is applied when you omit `service_container.features`, keeping the kernel keyring disabled unless explicitly required.
 - `service_resources` and `service_storage_*` fields translate directly into LXC CPU, memory, and disk allocations. The generated manifest documents cgroup limits while preserving unprivileged defaults.
+- `service_container.firewall` enables container-level firewall defaults and rule management, mapping cleanly to Proxmox's per-guest firewall API.
 
 ## Prerequisites
 

@@ -188,6 +188,50 @@ properties:
         type: array
         items:
           type: string
+      firewall:
+        type: object
+        properties:
+          enabled:
+            type: boolean
+          default_inbound_policy:
+            type: string
+          default_outbound_policy:
+            type: string
+          default_forward_policy:
+            type: string
+          log_level:
+            type: string
+          rules:
+            type: array
+            items:
+              type: object
+              properties:
+                action:
+                  type: string
+                direction:
+                  type: string
+                interface:
+                  type: string
+                macro:
+                  type: string
+                source:
+                  type: string
+                destination:
+                  type: string
+                protocol:
+                  type: string
+                source_port:
+                  type: string
+                destination_port:
+                  type: string
+                icmp_type:
+                  type: string
+                enable:
+                  type: boolean
+                log:
+                  type: boolean
+                comment:
+                  type: string
   needs_container_runtime:
     type: boolean
 
