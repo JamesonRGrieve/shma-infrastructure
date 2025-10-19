@@ -87,6 +87,8 @@ the edge configuration is correct.
 
 ## Roles
 
+> **Note:** There is no standalone `edge_proxy_nginx` role. Nginx automation is provided through the OPNsense plugin via `edge_opnsense_nginx`.
+
 ### `edge_ingress`
 
 Normalises the ingress contract for all downstream roles. It validates the

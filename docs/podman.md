@@ -72,7 +72,7 @@ CapabilityBoundingSet=
 WantedBy=multi-user.target default.target
 ```
 
-For `quadlet_scope: user`, the environment file and secrets live under `~/.config/containers/systemd/`. Enable lingering or ensure user services start at boot so the unit remains active.
+For `quadlet_scope: user`, the `.container` unit and environment file live under `~/.config/containers/systemd/`, while secret files are staged in `~/.config/containers/systemd/secrets/`. Enable lingering or ensure user services start at boot so the unit remains active.
 
 ## Deployment workflow
 
