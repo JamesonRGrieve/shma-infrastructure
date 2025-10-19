@@ -139,34 +139,31 @@ services:
 {% if connections_per_second and svc.name == primary_service_name %}
   {% set inline_env = inline_env + [{'name': 'CONNECTIONS_PER_SECOND', 'value': connections_per_second | string}] %}
 {% endif %}
-{% if inline_env %}
+  {% for item in inline_env %}
+    {% if item.name not in environment_ns.names %}
+      {% set _ = environment_ns.items.append({'name': item.name, 'value': item.value}) %}
+      {% set _ = environment_ns.names.append(item.name) %}
+    {% endif %}
+  {% endfor %}
+  {% if secrets is defined and secrets.rotation_timestamp is defined and secrets.rotation_timestamp is not none %}
+    {% if 'SHMA_SECRETS_ROTATION' not in environment_ns.names %}
+      {% set _ = environment_ns.items.append({'name': 'SHMA_SECRETS_ROTATION', 'value': secrets.rotation_timestamp}) %}
+      {% set _ = environment_ns.names.append('SHMA_SECRETS_ROTATION') %}
+    {% endif %}
+  {% endif %}
+  {% for secret_item in svc_secret_env %}
+    {% if secret_item.name not in environment_ns.names %}
+      {% set _ = environment_ns.items.append({'name': secret_item.name, 'value': '${' ~ secret_item.name ~ '}'}) %}
+      {% set _ = environment_ns.names.append(secret_item.name) %}
+    {% endif %}
+  {% endfor %}
+  {% if environment_ns.items %}
     environment:
-
-{% for item in inline_env %}
-  {% if item.name not in environment_ns.names %}
-    {% set _ = environment_ns.items.append({'name': item.name, 'value': item.value}) %}
-    {% set _ = environment_ns.names.append(item.name) %}
-  {% endif %}
-{% endfor %}
-{% if secrets is defined and secrets.rotation_timestamp is defined and secrets.rotation_timestamp is not none %}
-  {% if 'SHMA_SECRETS_ROTATION' not in environment_ns.names %}
-    {% set _ = environment_ns.items.append({'name': 'SHMA_SECRETS_ROTATION', 'value': secrets.rotation_timestamp}) %}
-    {% set _ = environment_ns.names.append('SHMA_SECRETS_ROTATION') %}
-  {% endif %}
-{% endif %}
-{% for secret_item in svc_secret_env %}
-  {% if secret_item.name not in environment_ns.names %}
-    {% set _ = environment_ns.items.append({'name': secret_item.name, 'value': '${' ~ secret_item.name ~ '}'}) %}
-    {% set _ = environment_ns.names.append(secret_item.name) %}
-  {% endif %}
-{% endfor %}
-{% if environment_ns.items %}
-    environment:
-{% for env_item in environment_ns.items %}
+  {% for env_item in environment_ns.items %}
       {{ env_item.name }}: {{ env_item.value }}
-{% endfor %}
-{% endif %}
-{% if svc.entrypoint is defined %}
+  {% endfor %}
+  {% endif %}
+  {% if svc.entrypoint is defined %}
     entrypoint: {{ svc.entrypoint if svc.entrypoint is string else svc.entrypoint | to_json }}
 {% endif %}
 {% if svc.command is defined %}
