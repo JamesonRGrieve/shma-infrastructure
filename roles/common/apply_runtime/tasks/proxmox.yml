@@ -92,11 +92,71 @@
         failed_when: false
         no_log: "{{ proxmox_hide_sensitive | default(true) }}"
 
-      - name: Fail provisioning after cleanup attempt
-        fail:
-          msg: |
-            Proxmox container provisioning failed and a cleanup was attempted.
-            Cleanup result: {{ proxmox_cleanup | default({}) }}
+- name: Configure container firewall
+  when: lxc_config.container.firewall is defined and lxc_config.container.firewall
+  vars:
+    proxmox_api_base_url: "https://{{ proxmox_api_host }}:8006/api2/json"
+    proxmox_api_headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    proxmox_firewall_config: {{ lxc_config.container.firewall }}
+    proxmox_firewall_options_payload: {{ proxmox_firewall_config | proxmox_firewall_options }}
+    proxmox_firewall_rule_payloads: {{ proxmox_firewall_config | proxmox_firewall_rules }}
+    proxmox_api_validate_certs: {{ proxmox_validate_certs | default(false) }}
+  block:
+    - name: Update container firewall defaults
+      ansible.builtin.uri:
+        url: "{{ proxmox_api_base_url }}/nodes/{{ proxmox_node }}/lxc/{{ lxc_config.container.vmid }}/firewall/options"
+        method: PUT
+        headers: {{ proxmox_api_headers }}
+        body_format: form-urlencoded
+        body: {{ proxmox_firewall_options_payload }}
+        validate_certs: {{ proxmox_api_validate_certs }}
+      when: proxmox_firewall_options_payload | length > 0
+
+    - name: Fetch existing container firewall rules
+      ansible.builtin.uri:
+        url: "{{ proxmox_api_base_url }}/nodes/{{ proxmox_node }}/lxc/{{ lxc_config.container.vmid }}/firewall/rules"
+        method: GET
+        headers: {{ proxmox_api_headers }}
+        validate_certs: {{ proxmox_api_validate_certs }}
+      register: proxmox_firewall_existing
+      when: proxmox_firewall_config.rules is defined
+
+    - name: Remove existing container firewall rules
+      ansible.builtin.uri:
+        url: "{{ proxmox_api_base_url }}/nodes/{{ proxmox_node }}/lxc/{{ lxc_config.container.vmid }}/firewall/rules/{{ item.pos }}"
+        method: DELETE
+        headers: {{ proxmox_api_headers }}
+        validate_certs: {{ proxmox_api_validate_certs }}
+      loop: "{{ proxmox_firewall_existing.json.data | default([]) | sort(attribute='pos', reverse=true) }}"
+      loop_control:
+        label: "{{ item.pos }}"
+      when:
+        - proxmox_firewall_config.rules is defined
+        - proxmox_firewall_existing.json.data is defined
+        - proxmox_firewall_existing.json.data | length > 0
+
+    - name: Apply container firewall rules
+      ansible.builtin.uri:
+        url: "{{ proxmox_api_base_url }}/nodes/{{ proxmox_node }}/lxc/{{ lxc_config.container.vmid }}/firewall/rules"
+        method: POST
+        headers: {{ proxmox_api_headers }}
+        body_format: form-urlencoded
+        body: {{ item }}
+        validate_certs: {{ proxmox_api_validate_certs }}
+      loop: "{{ proxmox_firewall_rule_payloads }}"
+      loop_control:
+        label: "{{ item.comment | default(item.type | default('rule')) }}"
+      when: proxmox_firewall_rule_payloads | length > 0
+
+- name: Start container
+  community.general.proxmox:
+    vmid: "{{ lxc_config.container.vmid }}"
+    node: "{{ proxmox_node }}"
+    api_token_id: "{{ proxmox_api_token_id }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
+    api_host: "{{ proxmox_api_host }}"
+    state: started
 
 - name: Wait for container SSH
   wait_for:

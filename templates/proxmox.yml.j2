@@ -30,9 +30,9 @@
     {% set _ = pkg_names.items.append(pkg_name | lower) %}
   {% endif %}
 {% endfor %}
-{% set allowed_lxc_features = ['nesting', 'keyctl', 'fuse', 'mount'] %}
 {% set feature_ns = namespace(value=None) %}
 {% if container.features is defined %}
+  {% set normalized_features = [] %}
   {% set raw_features = [] %}
   {% if container.features is string %}
     {% set raw_features = (container.features | string) | split(',') %}
@@ -41,40 +41,25 @@
   {% elif container.features %}
     {% set raw_features = [container.features] %}
   {% endif %}
-  {% set validated = namespace(items=[]) %}
-  {% set invalid = namespace(items=[]) %}
   {% for feature in raw_features %}
-    {% set feature_str = feature | string %}
-    {% set trimmed = feature_str | trim %}
-    {% if trimmed %}
-      {% set parts = trimmed | split('=') %}
+    {% set feature_str = (feature | string) | trim %}
+    {% if feature_str %}
+      {% set parts = feature_str | split('=') %}
       {% set name = parts[0] | trim %}
-      {% if name in allowed_lxc_features %}
-        {% set value_parts = parts[1:] %}
-        {% set value = value_parts | join('=') %}
-        {% if value | length > 0 %}
-          {% set normalized = name ~ '=' ~ value | trim %}
-        {% else %}
-          {% set normalized = name ~ '=1' %}
-        {% endif %}
-        {% if normalized not in validated.items %}
-          {% set _ = validated.items.append(normalized) %}
-        {% endif %}
+      {% set value_parts = parts[1:] %}
+      {% set value = value_parts | join('=') | trim %}
+      {% if value | length == 0 %}
+        {% set normalized = name ~ '=1' %}
       {% else %}
-        {% if name %}
-          {% set _ = invalid.items.append(name) %}
-        {% else %}
-          {% set _ = invalid.items.append(trimmed) %}
-        {% endif %}
+        {% set normalized = name ~ '=' ~ value %}
+      {% endif %}
+      {% if normalized not in normalized_features %}
+        {% set _ = normalized_features.append(normalized) %}
       {% endif %}
     {% endif %}
   {% endfor %}
-  {% if invalid.items %}
-    {% set invalid_message = 'Unknown Proxmox LXC feature(s): ' ~ (invalid.items | unique | join(', ')) %}
-    {{ lookup('pipe', 'python3 -c "import sys; sys.stderr.write(\"' ~ (invalid_message | replace('"', '\\"')) ~ '\n\"); sys.exit(1)"') }}
-  {% endif %}
-  {% if validated.items %}
-    {% set feature_ns.value = validated.items | join(',') %}
+  {% if normalized_features %}
+    {% set feature_ns.value = normalized_features | join(',') %}
   {% else %}
     {% set feature_ns.value = '' %}
   {% endif %}
@@ -125,6 +110,42 @@ container:
   features: "{{ feature_ns.value }}"
 {% else %}
   features: "keyctl=0"
+{% endif %}
+
+{% if container.firewall is defined and container.firewall %}
+  {% set firewall_config = container.firewall %}
+  firewall:
+    enabled: {{ firewall_config.enabled | default(true) | ternary(true, false) }}
+    {% if firewall_config.default_inbound_policy is defined %}
+    default_inbound_policy: "{{ firewall_config.default_inbound_policy }}"
+    {% endif %}
+    {% if firewall_config.default_outbound_policy is defined %}
+    default_outbound_policy: "{{ firewall_config.default_outbound_policy }}"
+    {% endif %}
+    {% if firewall_config.default_forward_policy is defined %}
+    default_forward_policy: "{{ firewall_config.default_forward_policy }}"
+    {% endif %}
+    {% if firewall_config.log_level is defined %}
+    log_level: "{{ firewall_config.log_level }}"
+    {% endif %}
+    {% if firewall_config.rules is defined and firewall_config.rules %}
+    rules:
+    {% for rule in firewall_config.rules %}
+      - {% if rule.action is defined %}action: "{{ rule.action }}"{% endif %}
+        {% if rule.direction is defined %}direction: "{{ rule.direction }}"{% endif %}
+        {% if rule.interface is defined %}interface: "{{ rule.interface }}"{% endif %}
+        {% if rule.macro is defined %}macro: "{{ rule.macro }}"{% endif %}
+        {% if rule.source is defined %}source: "{{ rule.source }}"{% endif %}
+        {% if rule.destination is defined %}destination: "{{ rule.destination }}"{% endif %}
+        {% if rule.protocol is defined %}protocol: "{{ rule.protocol }}"{% endif %}
+        {% if rule.source_port is defined %}source_port: "{{ rule.source_port }}"{% endif %}
+        {% if rule.destination_port is defined %}destination_port: "{{ rule.destination_port }}"{% endif %}
+        {% if rule.icmp_type is defined %}icmp_type: "{{ rule.icmp_type }}"{% endif %}
+        {% if rule.enable is defined %}enable: {{ rule.enable | ternary(true, false) }}{% endif %}
+        {% if rule.log is defined %}log: {{ rule.log | ternary(true, false) }}{% endif %}
+        {% if rule.comment is defined %}comment: "{{ rule.comment }}"{% endif %}
+    {% endfor %}
+    {% endif %}
 {% endif %}
 
 {% if has_setup %}
