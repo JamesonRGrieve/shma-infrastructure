@@ -352,6 +352,41 @@ properties:
         oneOf:
           - type: boolean
           - type: string
+      system_call_filter:
+        oneOf:
+          - type: string
+          - type: array
+            items:
+              type: string
+  service_restart:
+    type: object
+    properties:
+      restart:
+        type: string
+      restart_sec:
+        type: string
+      restart_max_delay_sec:
+        type: string
+      restart_timeout_sec:
+        type: string
+      restart_prevent_exit_status:
+        oneOf:
+          - type: string
+          - type: array
+            items:
+              type: string
+      restart_force_exit_status:
+        oneOf:
+          - type: string
+          - type: array
+            items:
+              type: string
+      start_limit_interval_sec:
+        type: string
+      start_limit_burst:
+        type: integer
+      start_limit_action:
+        type: string
   kubernetes:
     type: object
     properties:
