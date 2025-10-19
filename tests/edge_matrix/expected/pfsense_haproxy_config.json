@@ -1,0 +1,96 @@
+{
+  "body": {
+    "backends": [
+      {
+        "balance": "roundrobin",
+        "health_check_enabled": true,
+        "health_check_method": "GET",
+        "health_check_path": "/",
+        "name": "app-one",
+        "servers": [
+          {
+            "address": "198.51.100.10",
+            "name": "app-one-primary",
+            "port": "8080",
+            "ssl": false
+          }
+        ]
+      },
+      {
+        "balance": "roundrobin",
+        "health_check_enabled": true,
+        "health_check_method": "GET",
+        "health_check_path": "/metrics",
+        "name": "metrics",
+        "servers": [
+          {
+            "address": "198.51.100.11",
+            "name": "metrics-primary",
+            "port": "9090",
+            "ssl": true
+          }
+        ]
+      }
+    ],
+    "frontends": [
+      {
+        "default_backend": "app-one",
+        "listen_addresses": [
+          {
+            "address": "0.0.0.0",
+            "port": "80",
+            "ssl": false
+          },
+          {
+            "address": "0.0.0.0",
+            "port": "443",
+            "ssl": true
+          }
+        ],
+        "name": "app-one-router",
+        "rules": [
+          {
+            "type": "host",
+            "value": "app-one.example.test"
+          }
+        ],
+        "tls_certificate_ref": "tls-cert-ref",
+        "tls_enabled": true
+      },
+      {
+        "default_backend": "metrics",
+        "listen_addresses": [
+          {
+            "address": "0.0.0.0",
+            "port": "80",
+            "ssl": false
+          },
+          {
+            "address": "0.0.0.0",
+            "port": "443",
+            "ssl": true
+          }
+        ],
+        "name": "metrics-router",
+        "rules": [
+          {
+            "type": "host",
+            "value": "metrics.example.test"
+          },
+          {
+            "type": "path_beg",
+            "value": "/metrics"
+          }
+        ],
+        "tls_certificate_ref": "",
+        "tls_enabled": false
+      }
+    ]
+  },
+  "body_format": "json",
+  "headers": {
+    "Authorization": "haproxy-subsystem-token"
+  },
+  "method": "POST",
+  "url": "https://edge-pfsense.local:443/api/v1/services/haproxy/config"
+}

@@ -4,7 +4,6 @@
   slurp:
     src: "{{ edge_ingress_contract.exports_env_path }}"
   register: edge_ingress_contract_exports_env
-  no_log: true
 
 - name: Determine ingress exports for {{ edge_ingress_contract.service_id | default('unnamed service') }}
   set_fact:
@@ -12,24 +11,50 @@
       {{
         (edge_ingress_contract.exports | default({}))
         if edge_ingress_contract.exports is defined
-        else (edge_ingress_contract_exports_env.content | b64decode | parse_ingress_exports(edge_ingress_required_keys | tuple))
+        else (edge_ingress_contract_exports_env.content | b64decode | parse_ingress_exports(edge_ingress_required_keys))
       }}
   no_log: true
 
+- name: Validate ingress exports for {{ edge_ingress_contract.service_id | default('unnamed service') }}
+  ansible.builtin.assert:
+    that:
+      - "(edge_ingress_contract_exports.get(required_key) | default('') | string | length) > 0"
+    fail_msg: >-
+      Ingress exports for {{ edge_ingress_contract.service_id | default('unnamed service') }} must define {{ required_key }}
+  loop: "{{ edge_ingress_required_keys }}"
+  loop_control:
+    loop_var: required_key
+
 - name: Merge ingress defaults for {{ edge_ingress_contract.service_id | default('unnamed service') }}
   set_fact:
-    edge_ingress_backends: "{{ edge_ingress_backends + [ merged_backend ] }}"
+    edge_ingress_current_backend: "{{ merged_backend }}"
+  no_log: true
   vars:
-    merged_backend:
-      service_id: "{{ edge_ingress_contract.service_id | default(edge_ingress_contract_exports.APP_FQDN) }}"
-      router_name: "{{ edge_ingress_contract.router_name | default((edge_ingress_contract.service_id | default(edge_ingress_contract_exports.APP_FQDN)) + '-router') }}"
-      router_entrypoint: "{{ edge_ingress_contract.router_entrypoint | default(edge_ingress_defaults.router_entrypoint) }}"
-      tls: {{ edge_ingress_contract.tls | default(edge_ingress_defaults.tls) | bool }}
-      tls_certresolver: "{{ edge_ingress_contract.tls_certresolver | default(edge_ingress_defaults.tls_certresolver) }}"
-      scheme: "{{ edge_ingress_contract.scheme | default(edge_ingress_defaults.scheme) }}"
-      path_prefix: "{{ edge_ingress_contract.path_prefix | default(edge_ingress_defaults.path_prefix) }}"
-      middlewares: {{ edge_ingress_contract.middlewares | default([]) }}
-      pass_host_header: {{ edge_ingress_contract.pass_host_header | default(True) | bool }}
-      preserve_host: {{ edge_ingress_contract.preserve_host | default(False) | bool }}
-      exports: {{ edge_ingress_contract_exports }}
-      service_labels: {{ edge_ingress_contract.service_labels | default({}) }}
+    merged_backend: >-
+      {{ {
+        'service_id': edge_ingress_contract.service_id | default(edge_ingress_contract_exports.APP_FQDN),
+        'router_name': edge_ingress_contract.router_name | default((edge_ingress_contract.service_id | default(edge_ingress_contract_exports.APP_FQDN)) + '-router'),
+        'router_entrypoint': edge_ingress_contract.router_entrypoint | default(edge_ingress_defaults.router_entrypoint),
+        'tls': edge_ingress_contract.tls | default(edge_ingress_defaults.tls) | bool,
+        'tls_certresolver': edge_ingress_contract.tls_certresolver | default(edge_ingress_defaults.tls_certresolver),
+        'scheme': edge_ingress_contract.scheme | default(edge_ingress_defaults.scheme),
+        'path_prefix': edge_ingress_contract.path_prefix | default(edge_ingress_defaults.path_prefix),
+        'middlewares': edge_ingress_contract.middlewares | default([]),
+        'pass_host_header': edge_ingress_contract.pass_host_header | default(True) | bool,
+        'preserve_host': edge_ingress_contract.preserve_host | default(False) | bool,
+        'exports': edge_ingress_contract_exports,
+        'service_labels': edge_ingress_contract.service_labels | default({})
+      } | to_json | from_json }}
+- name: Enforce TLS toggle contract for {{ edge_ingress_contract.service_id | default('unnamed service') }}
+  ansible.builtin.assert:
+    that:
+      - edge_ingress_current_backend.tls in [true, false]
+      - (edge_ingress_current_backend.tls | bool) or (edge_ingress_current_backend.tls_certresolver in [none, ''])
+    fail_msg: >-
+      TLS settings for {{ edge_ingress_contract.service_id | default(edge_ingress_contract_exports.APP_FQDN) }} must only define
+      TLS configuration when tls is true
+
+- name: Accumulate ingress backends for {{ edge_ingress_contract.service_id | default('unnamed service') }}
+  set_fact:
+    edge_ingress_backends: "{{ edge_ingress_backends + [ edge_ingress_current_backend ] }}"
+  no_log: true

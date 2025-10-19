@@ -23,6 +23,18 @@ def _parse_env(content: str) -> dict[str, str]:
     return exports
 
 
+def _validate_ingress_exports(
+    exports: dict[str, str], required_keys: tuple[str, ...] | None = None
+) -> dict[str, str]:
+    keys_to_check = required_keys or REQUIRED_EXPORT_KEYS
+    missing = [key for key in keys_to_check if not exports.get(key)]
+    if missing:
+        raise AnsibleFilterError(
+            "ingress exports missing required keys: " + ", ".join(missing)
+        )
+    return exports
+
+
 def parse_ingress_exports(
     content: str, required_keys: tuple[str, ...] | None = None
 ) -> dict[str, str]:
@@ -38,13 +50,17 @@ def parse_ingress_exports(
     """
 
     exports = _parse_env(content)
-    keys_to_check = required_keys or REQUIRED_EXPORT_KEYS
-    missing = [key for key in keys_to_check if not exports.get(key)]
-    if missing:
-        raise AnsibleFilterError(
-            "ingress exports missing required keys: " + ", ".join(missing)
-        )
-    return exports
+    return _validate_ingress_exports(exports, required_keys)
+
+
+def validate_ingress_exports(
+    exports: dict[str, str], required_keys: tuple[str, ...] | None = None
+) -> dict[str, str]:
+    """Ensure ingress exports include required keys."""
+
+    if not isinstance(exports, dict):
+        raise AnsibleFilterError("ingress exports must be provided as a mapping")
+    return _validate_ingress_exports(exports, required_keys)
 
 
 def coerce_ingress_port(exports: dict[str, str]) -> int:
@@ -64,5 +80,6 @@ class FilterModule:
     def filters(self) -> dict[str, object]:
         return {
             "parse_ingress_exports": parse_ingress_exports,
+            "validate_ingress_exports": validate_ingress_exports,
             "coerce_ingress_port": coerce_ingress_port,
         }

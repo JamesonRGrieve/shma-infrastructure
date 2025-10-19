@@ -6,6 +6,13 @@
       - opnsense_nginx_api_secret | length > 0
     fail_msg: "opnsense_nginx_api_key and opnsense_nginx_api_secret must be provided to configure OPNsense Nginx"
 
+- name: Enforce scoped OPNsense Nginx API key permissions
+  ansible.builtin.assert:
+    that:
+      - "'root' not in (opnsense_nginx_api_key | lower)"
+      - "'global' not in (opnsense_nginx_api_key | lower)"
+    fail_msg: "opnsense_nginx_api_key must target the Nginx subsystem instead of root/global access"
+
 - name: Initialize OPNsense Nginx payload containers
   ansible.builtin.set_fact:
     opnsense_nginx_upstreams: []

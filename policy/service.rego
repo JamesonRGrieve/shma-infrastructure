@@ -2,17 +2,12 @@ package shma.service
 
 deny[msg] {
   image := input.service_image
-  not image_pinned(image)
-  msg := sprintf("service_image %q must include a pinned tag or digest", [image])
+  not image_digest_pinned(image)
+  msg := sprintf("service_image %q must be pinned by immutable digest", [image])
 }
 
-image_pinned(image) {
+image_digest_pinned(image) {
   contains(image, "@sha256:")
-}
-
-image_pinned(image) {
-  contains(image, ":")
-  not endswith(lower(image), ":latest")
 }
 
 # Ensure LXC features are gated behind needs_container_runtime.
