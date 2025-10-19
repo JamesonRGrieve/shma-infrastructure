@@ -3,9 +3,9 @@
   set_fact:
     effective_service_unit_name: "{{ service_unit_name | default(service_id) }}"
 
-- name: Set service IP facts
-  set_fact:
-    service_ip: "{{ service_ip | default(ansible_default_ipv4.address) }}"
+- name: Ensure service IP facts
+  ansible.builtin.include_tasks:
+    file: set_service_ip.yml
 
 - name: Install service packages
   become: true

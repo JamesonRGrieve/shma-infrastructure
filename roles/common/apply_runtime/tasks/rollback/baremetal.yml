@@ -1,0 +1,9 @@
+---
+- name: Stop baremetal service after failure
+  become: true
+  systemd:
+    name: "{{ effective_service_unit_name | default(service_unit_name | default(service_id)) }}"
+    state: stopped
+  when:
+    - service_id is defined
+  failed_when: false

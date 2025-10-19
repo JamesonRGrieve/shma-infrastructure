@@ -24,15 +24,22 @@
 
 - name: Register Podman secret shredding handler
   set_fact:
-    podman_secret_cleanup:
-      env_path: "{{ quadlet_env_path }}"
-      env: "{{ quadlet_secret_env }}"
-      files: "{{ quadlet_secret_files }}"
-      directory: "{{ quadlet_secret_dir }}"
-      shred: "{{ quadlet_secret_shred }}"
-      become: {{ (quadlet_effective_scope == 'system') | bool }}
+    runtime_secret_cleanup_contexts: >-
+      {{
+        (runtime_secret_cleanup_contexts | default([]))
+        + [
+          {
+            'env_path': quadlet_env_path,
+            'env': quadlet_secret_env,
+            'files': quadlet_secret_files,
+            'directory': quadlet_secret_dir,
+            'shred': quadlet_secret_shred,
+            'become': (quadlet_effective_scope == 'system') | bool,
+          }
+        ]
+      }}
   when: quadlet_secret_env | length > 0 or quadlet_secret_files | length > 0
-  notify: podman runtime secret cleanup
+  notify: runtime secret cleanup
   changed_when: true
 
 - name: Ensure quadlet directory exists
@@ -91,6 +98,6 @@
     state: started
     scope: "{{ quadlet_effective_scope }}"
 
-- name: Set service IP for health checks
-  set_fact:
-    service_ip: "{{ service_ip | default(ansible_default_ipv4.address) }}"
+- name: Ensure service IP for health checks
+  ansible.builtin.include_tasks:
+    file: set_service_ip.yml
