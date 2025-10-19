@@ -14,6 +14,8 @@ hardening_disable_services:
   - cups.service
 hardening_additional_disable_services: []
 hardening_aide_init_timeout: 1800
+hardening_aide_async_poll_interval: 15
+hardening_aide_async_retries: "{{ (hardening_aide_init_timeout // hardening_aide_async_poll_interval) | int }}"
 hardening_use_async_aide: true
 hardening_ipv6_disable_targets:
   - net.ipv6.conf.all.disable_ipv6
