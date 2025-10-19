@@ -7,48 +7,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from ansible.errors import AnsibleFilterError
 
-
-def _as_list(value: Any) -> List[Any]:
-    if value is None:
-        return []
-    if isinstance(value, (list, tuple, set)):
-        return list(value)
-    return [value]
-
-
-def _unique(items: Iterable[Any]) -> List[Any]:
-    seen = set()
-    result: List[Any] = []
-    for item in items:
-        if item not in seen:
-            seen.add(item)
-            result.append(item)
-    return result
-
-
-def _ensure_env_entries(value: Any, *, context: str) -> List[Dict[str, Any]]:
-    entries: List[Dict[str, Any]] = []
-    if value is None:
-        return entries
-    if isinstance(value, dict):
-        for name, val in value.items():
-            entries.append({"name": name, "value": val})
-        return entries
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        for item in value:
-            if not isinstance(item, dict):
-                raise AnsibleFilterError(
-                    f"{context} entries must be dictionaries with 'name' and 'value' keys"
-                )
-            if "name" not in item:
-                raise AnsibleFilterError(
-                    f"{context} entry {item!r} is missing the required 'name' key"
-                )
-            entries.append({"name": item["name"], "value": item.get("value")})
-        return entries
-    raise AnsibleFilterError(
-        f"{context} must be a sequence or mapping, received {type(value).__name__}"
-    )
+from .runtime_common import _as_list, _unique, compose_environment, ensure_env_entries
 
 
 def _validate_apparmor_profile(
@@ -67,39 +26,6 @@ def _validate_apparmor_profile(
         )
 
 
-def _normalise_env(
-    inline_env: List[Dict[str, Any]],
-    secret_env: List[Dict[str, Any]],
-    *,
-    rotation_timestamp: Optional[str],
-    service_name: str,
-    connections_per_second: Optional[Any],
-    primary_service_name: Optional[str],
-) -> List[Dict[str, Any]]:
-    environment: List[Dict[str, Any]] = []
-    names = set()
-
-    def add_entry(name: str, value: Any) -> None:
-        if name in names:
-            return
-        environment.append({"name": name, "value": value})
-        names.add(name)
-
-    for entry in inline_env:
-        add_entry(entry["name"], entry.get("value"))
-
-    if connections_per_second is not None and service_name == primary_service_name:
-        add_entry("CONNECTIONS_PER_SECOND", str(connections_per_second))
-
-    if rotation_timestamp is not None:
-        add_entry("SHMA_SECRETS_ROTATION", rotation_timestamp)
-
-    for entry in secret_env:
-        add_entry(entry["name"], f"${{{entry['name']}}}")
-
-    return environment
-
-
 def docker_compose_prepare_services(
     services: Sequence[Dict[str, Any]],
     defaults: Optional[Dict[str, Any]] = None,
@@ -114,7 +40,7 @@ def docker_compose_prepare_services(
         defaults.get("allowed_apparmor_profiles", ["docker-default"])
     )
     docker_tmpfs_defaults = _as_list(defaults.get("docker_tmpfs"))
-    secret_env_default = _ensure_env_entries(
+    secret_env_default = ensure_env_entries(
         defaults.get("secret_env"), context="secret_env"
     )
     file_secrets_default = defaults.get("file_secrets", []) or []
@@ -176,12 +102,12 @@ def docker_compose_prepare_services(
 
         svc_env_file = _unique(_as_list(svc.get("env_file")))
 
-        svc_secret_env = _ensure_env_entries(
+        svc_secret_env = ensure_env_entries(
             svc.get("secret_env", secret_env_default), context="secret_env"
         )
-        inline_env = _ensure_env_entries(svc.get("env", []), context="environment")
+        inline_env = ensure_env_entries(svc.get("env", []), context="environment")
 
-        environment = _normalise_env(
+        environment = compose_environment(
             inline_env,
             svc_secret_env,
             rotation_timestamp=rotation_timestamp,

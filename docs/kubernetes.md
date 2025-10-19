@@ -4,18 +4,19 @@ Render Kubernetes manifests with Secret integration, readiness probes, hostPath-
 
 ## Secret transport differences
 
-Kubernetes stores `secrets.env` and `secrets.files` as mounted files. When migrating from Docker or Podman, adjust workloads that
-expect environment variables to read the content from files (or populate a ConfigMap) and reference those volumes in the pod spec.
-Moving in the opposite direction requires translating file reads into environment variables or leaving the files in
-`secrets.files` so adapters render them locally before invoking the container runtime.
+Kubernetes stores secrets declared with `type: env` and `type: file` as mounted files. When migrating from Docker or Podman,
+adjust workloads that expect environment variables to read the content from files (or populate a ConfigMap) and reference those
+volumes in the pod spec. Moving in the opposite direction requires translating file reads into environment variables or leaving
+the files in `type: file` entries so adapters render them locally before invoking the container runtime.
 
 ## Updates
 
-- `templates/kubernetes.yml.j2` emits separate Secrets for environment variables and file-backed material to keep RBAC scopes narrow.
+- `templates/kubernetes.yml.j2` emits separate Secrets for environment variables (`type: env`) and file-backed material (`type: file`) to keep RBAC scopes narrow.
 - Containers mount secret files via a dedicated volume and consume environment variables via `valueFrom`.
 - Liveness and readiness probes originate from `health.cmd`, keeping checks consistent across runtimes.
 - Changing `secrets.rotation_timestamp` adds a pod template annotation and environment variable so Deployments roll safely during secret rotation.
 - Volume definitions now support `service_volumes.host_path`, which renders a `hostPath` mount when you want container filesystems to remain ephemeral while data persists on the node. Set `host_path_type` when you need a specific Kubernetes `hostPath` strategy.
+- A restrictive `NetworkPolicy` is rendered by default, allowing ingress from the workload namespace and unconstrained egress. Provide custom `service_network_policy` data to relax or extend the rules.
 - Pin `service_image` values by digest; the rendered Deployment references that immutable identifier so rollouts remain deliberate.
 - `service_resources.connections_per_second` emits a `CONNECTIONS_PER_SECOND` environment variable that rate-limiting sidecars
   (nginx/envoy) can use to clamp per-pod connection bursts.
@@ -33,12 +34,13 @@ ansible-galaxy collection install kubernetes.core
 
 `templates/kubernetes.yml.j2` emits:
 
-- `Secret` – named `<service_id>-env`, containing keys for every `secrets.env` entry.
-- `Secret` – named `<service_id>-files`, storing the rendered secret files.
+- `Secret` – named `<service_id>-env`, containing keys for every secret declared with `type: env`.
+- `Secret` – named `<service_id>-files`, storing the rendered secret files (`type: file`).
 - `PersistentVolumeClaim` – sized from `service_storage_gb` or `service_storage_size`. Skipped automatically when `service_volumes.host_path` is provided.
 - `emptyDir` – emitted for each `mounts.ephemeral_mounts` entry that applies to Kubernetes, defaulting to `medium: Memory`.
 - `Deployment` – references the Secret for env vars, mounts secret files, configures probes/resources, and enforces non-root security defaults.
 - `Service` – exposes declared `service_ports` within the cluster.
+- `NetworkPolicy` – restricts ingress/egress using either the default rules or the optional `service_network_policy` overrides.
 
 Snippet:
 
@@ -118,7 +120,7 @@ kubectl apply --dry-run=client --validate=true -f /tmp/ansible-runtime/sample-se
 ## Deployment tips
 
 - Ensure the referenced namespace (`k8s_namespace`) exists before applying.
-- Verify that your CNI implementation enforces `NetworkPolicy` (for example Calico, Cilium, or kube-router) and author ingress/egress policies alongside the rendered manifests when workloads require isolation.
+- Verify that your CNI implementation enforces `NetworkPolicy` (for example Calico, Cilium, or kube-router); the rendered manifests include a policy by default, and Kubernetes clusters without policy enforcement will ignore it.
 - Use the generated `<service_id>-files` Secret for only the workloads that truly need those files; other deployments can skip mounting the `secret-files` volume entirely.
 - Adjust `service_replicas` to scale deployments and rely on the readiness probe before routing traffic.
 - Confirm etcd encryption at rest is enabled (`kubectl get apiserver cluster -o jsonpath='{.spec.encryptionConfiguration}'`) before applying rendered Secrets; otherwise, configure encryption providers or document the risk for operators.

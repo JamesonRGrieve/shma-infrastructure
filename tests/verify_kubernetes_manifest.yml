@@ -38,6 +38,7 @@
         env_secret_resources: "{{ kubernetes_resources | selectattr('kind', '==', 'Secret') | selectattr('metadata.name', '==', deployment_name ~ '-env') | list }}"
         file_secret_resources: "{{ kubernetes_resources | selectattr('kind', '==', 'Secret') | selectattr('metadata.name', '==', deployment_name ~ '-files') | list }}"
         pvc_resources: "{{ kubernetes_resources | selectattr('kind', '==', 'PersistentVolumeClaim') | list }}"
+        network_policy_resources: "{{ kubernetes_resources | selectattr('kind', '==', 'NetworkPolicy') | list }}"
 
     - name: Validate environment secret layout
       ansible.builtin.assert:
@@ -135,6 +136,16 @@
           - data_volume_entries | length == 1
           - data_volume_entries[0].hostPath.path == service_volumes[0].host_path
         fail_msg: "HostPath volume should back the primary data mount."
+
+    - name: Validate network policy defaults
+      ansible.builtin.assert:
+        that:
+          - network_policy_resources | length == 1
+          - network_policy_resources[0].spec.podSelector.matchLabels.app == service_name | default(service_id)
+          - 'Ingress' in network_policy_resources[0].spec.policyTypes
+          - 'Egress' in network_policy_resources[0].spec.policyTypes
+          - network_policy_resources[0].spec.ingress[0].from[0].namespaceSelector.matchLabels['kubernetes.io/metadata.name'] == service_namespace | default('default')
+        fail_msg: "NetworkPolicy must target the workload namespace with ingress restricted to that namespace and default egress allowed."
 
     - name: Validate health probe commands
       ansible.builtin.assert:

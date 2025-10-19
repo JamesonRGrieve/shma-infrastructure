@@ -68,11 +68,13 @@ def ephemeral_paths_for_baremetal(service: dict) -> List[str]:
         path = mount.get("path")
         if not path:
             continue
-        apply_to: Iterable[str] | None = mount.get("apply_to")
-        if not apply_to:
-            apply_to = DEFAULT_APPLY_TARGETS
-        if "baremetal" in apply_to:
-            paths.append(path)
+        runtimes: Iterable[str] | None = mount.get("runtimes")
+        if runtimes is None:
+            runtimes = mount.get("apply_to")
+        if runtimes:
+            if "baremetal" not in runtimes:
+                continue
+        paths.append(path)
     return paths
 
 

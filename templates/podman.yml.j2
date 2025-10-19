@@ -1,13 +1,13 @@
-{% from '_common.j2' import with_defaults %}
-{% set _defaults_ctx = namespace(security=None, catalog=None) %}
-{% call(defaults, catalog) with_defaults(service_security, secrets) %}
-  {% set _defaults_ctx.security = defaults %}
-  {% set _defaults_ctx.catalog = catalog %}
+{% from '_common.j2' import service_context %}
+{% set _ctx = namespace(security=None, secrets=None, mounts=None) %}
+{% call(security_defaults, secret_context, mount_context) service_context(service_security, secrets, mounts) %}
+  {% set _ctx.security = security_defaults %}
+  {% set _ctx.secrets = secret_context %}
+  {% set _ctx.mounts = mount_context %}
 {% endcall %}
-{% set shma_security_defaults = _defaults_ctx.security %}
-{% set mounts_config = mounts | default({}) %}
-{% set ephemeral_mounts = mounts_config.ephemeral_mounts | default([]) %}
-{% set default_apply_targets = ['docker', 'podman', 'kubernetes', 'proxmox', 'baremetal'] %}
+{% set shma_security_defaults = _ctx.security %}
+{% set shma_secret_context = _ctx.secrets %}
+{% set podman_ephemeral_mounts = _ctx.mounts.ephemeral | select_ephemeral_mounts('podman') %}
 {% set default_run_user = shma_security_defaults.run_user %}
 {% set default_run_group = shma_security_defaults.run_group %}
 {% set quadlet_user = shma_security_defaults.compose_user if shma_security_defaults.compose_user is not none else ((default_run_user | string) ~ ':' ~ (default_run_group | string)) %}
@@ -17,34 +17,31 @@
 {% set bounding_set = shma_security_defaults.capability_bounding_set %}
 {% set tmpfs_hardening_flags = ['nosuid', 'nodev', 'noexec'] %}
 {% set podman_tmpfs = namespace(entries=[]) %}
-{% for mount in ephemeral_mounts %}
-  {% set apply_targets = mount.apply_to | default(default_apply_targets) %}
-  {% if 'podman' in apply_targets %}
-    {% set existing = none %}
-    {% for item in podman_tmpfs.entries %}
-      {% if item.path == mount.path %}
-        {% set existing = item %}
-      {% endif %}
-    {% endfor %}
-    {% if existing is none %}
-      {% set existing = namespace(path=mount.path, options=[]) %}
-      {% set _ = podman_tmpfs.entries.append(existing) %}
+{% for mount in podman_ephemeral_mounts %}
+  {% set existing = none %}
+  {% for item in podman_tmpfs.entries %}
+    {% if item.path == mount.path %}
+      {% set existing = item %}
     {% endif %}
-    {% for flag in tmpfs_hardening_flags %}
-      {% if flag not in existing.options %}{% set _ = existing.options.append(flag) %}{% endif %}
-    {% endfor %}
-    {% if mount.size is defined %}
-      {% set size_flag = 'size=' ~ mount.size %}
-      {% if size_flag not in existing.options %}{% set _ = existing.options.append(size_flag) %}{% endif %}
-    {% endif %}
-    {% if mount.mode is defined %}
-      {% set mode_flag = 'mode=' ~ mount.mode %}
-      {% if mode_flag not in existing.options %}{% set _ = existing.options.append(mode_flag) %}{% endif %}
-    {% endif %}
+  {% endfor %}
+  {% if existing is none %}
+    {% set existing = namespace(path=mount.path, options=[]) %}
+    {% set _ = podman_tmpfs.entries.append(existing) %}
+  {% endif %}
+  {% for flag in tmpfs_hardening_flags %}
+    {% if flag not in existing.options %}{% set _ = existing.options.append(flag) %}{% endif %}
+  {% endfor %}
+  {% if mount.size is not none %}
+    {% set size_flag = 'size=' ~ mount.size %}
+    {% if size_flag not in existing.options %}{% set _ = existing.options.append(size_flag) %}{% endif %}
+  {% endif %}
+  {% if mount.mode is not none %}
+    {% set mode_flag = 'mode=' ~ mount.mode %}
+    {% if mode_flag not in existing.options %}{% set _ = existing.options.append(mode_flag) %}{% endif %}
   {% endif %}
 {% endfor %}
-{% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] %}
-{% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
+{% set secret_env = shma_secret_context.env %}
+{% set file_secrets = shma_secret_context.files %}
 {% set quadlet_scope_value = quadlet_scope | default('system') %}
 {% if quadlet_scope_value == 'user' %}
 {% set quadlet_base_dir = '%h/.config/containers/systemd' %}
@@ -55,15 +52,13 @@
 {% set secret_dir = quadlet_base_dir ~ '/secrets' %}
 {% set ports = service_ports | default([]) %}
 {% set volumes = service_volumes | default([]) %}
-{% set inline_env = service_env | default([]) %}
-{% set inline_env_names = inline_env | map(attribute='name') | list %}
 {% set resources = service_resources | default({}) %}
+{% set connections_per_second = resources.connections_per_second if resources.connections_per_second is defined else None %}
+{% set inline_env = service_env | merge_inline_environment(rotation_timestamp=shma_secret_context.rotation_timestamp, connections_per_second=connections_per_second, service_name=service_name | default(service_id), primary_service_name=service_name | default(service_id)) %}
+{% set inline_env_names = inline_env | map(attribute='name') | list %}
 {% set user_namespace = security.user_namespace if security.user_namespace is defined else none %}
-{% if resources.connections_per_second is defined %}
-  {% set inline_env = inline_env + [{'name': 'CONNECTIONS_PER_SECOND', 'value': resources.connections_per_second | string}] %}
-{% endif %}
 {% set auto_update_mode = quadlet_auto_update | default('none') %}
-{% set health_cmd = health | health_command %}
+{% set health_details = health | health_spec %}
 [Unit]
 Description={{ unit_description }}
 After=network-online.target
@@ -85,9 +80,6 @@ UserNS={{ user_namespace }}
 {% for env in inline_env %}
 Environment={{ env.name }}={{ env.value }}
 {% endfor %}
-{% if secrets is defined and secrets.rotation_timestamp is defined and secrets.rotation_timestamp is not none and 'SHMA_SECRETS_ROTATION' not in inline_env_names %}
-Environment=SHMA_SECRETS_ROTATION={{ secrets.rotation_timestamp }}
-{% endif %}
 {% if secret_env %}
 EnvironmentFile={{ env_file_path }}
 {% endif %}
@@ -109,10 +101,10 @@ Tmpfs={{ tmpfs_value }}
 {% for port in ports %}
 PublishPort={{ port.host_ip | default('') }}{% if port.host_ip is defined and port.host_ip | string | length > 0 %}:{% endif %}{{ port.published | default(port.target) }}:{{ port.target }}{% if port.protocol is defined %}/{{ port.protocol }}{% endif %}
 {% endfor %}
-HealthCmd={{ health_cmd | join(' ') }}
-HealthInterval={{ health.interval | default('10s') }}
-HealthTimeout={{ health.timeout | default('5s') }}
-HealthRetries={{ health.retries | default(3) }}
+HealthCmd={{ health_details.command | join(' ') }}
+HealthInterval={{ health_details.interval }}
+HealthTimeout={{ health_details.timeout }}
+HealthRetries={{ health_details.retries }}
 
 [Service]
 Restart=always

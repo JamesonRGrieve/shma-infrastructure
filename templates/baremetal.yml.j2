@@ -1,3 +1,9 @@
+{% from '_common.j2' import service_context %}
+{% set _ctx = namespace(security=None, mounts=None) %}
+{% call(security_defaults, _, mount_context) service_context(service_security, secrets, mounts) %}
+  {% set _ctx.security = security_defaults %}
+  {% set _ctx.mounts = mount_context %}
+{% endcall %}
 {% set unit = service_unit | default({}) %}
 {% set description = unit.description | default('Managed service for ' ~ (service_name | default(service_id))) %}
 {% set after = unit.after | default(['network.target']) %}
@@ -5,18 +11,13 @@
 {% set install_targets = unit.install_wanted_by | default(['multi-user.target']) %}
 {% set security = service_security | default({}) %}
 {% set restart_config = service_restart | default({}) %}
-{% set mounts_config = mounts | default({}) %}
-{% set ephemeral_mounts = mounts_config.ephemeral_mounts | default([]) %}
-{% set default_apply_targets = ['docker', 'podman', 'kubernetes', 'proxmox', 'baremetal'] %}
+{% set baremetal_mounts = _ctx.mounts.ephemeral | select_ephemeral_mounts('baremetal') %}
 {% set baremetal_tmpfs = namespace(items=[]) %}
-{% for mount in ephemeral_mounts %}
-  {% set apply_targets = mount.apply_to | default(default_apply_targets) %}
-  {% if 'baremetal' in apply_targets %}
-    {% set options = [] %}
-    {% if mount.size is defined %}{% set _ = options.append('size=' ~ mount.size) %}{% endif %}
-    {% if mount.mode is defined %}{% set _ = options.append('mode=' ~ mount.mode) %}{% endif %}
-    {% set _ = baremetal_tmpfs.items.append({'path': mount.path, 'options': options}) %}
-  {% endif %}
+{% for mount in baremetal_mounts %}
+  {% set options = [] %}
+  {% if mount.size is not none %}{% set _ = options.append('size=' ~ mount.size) %}{% endif %}
+  {% if mount.mode is not none %}{% set _ = options.append('mode=' ~ mount.mode) %}{% endif %}
+  {% set _ = baremetal_tmpfs.items.append({'path': mount.path, 'options': options}) %}
 {% endfor %}
 {% macro systemd_toggle(value, true_value='yes', false_value='no') -%}
   {%- if value is boolean -%}
@@ -25,7 +26,7 @@
     {{ value }}
   {%- endif -%}
 {%- endmacro %}
-{% set read_only_root = security.read_only_root_filesystem if security.read_only_root_filesystem is defined else true %}
+{% set read_only_root = _ctx.security.read_only_root %}
 {% set private_tmp_default = security.private_tmp if security.private_tmp is defined else true %}
 {% set protect_system_default = security.protect_system if security.protect_system is defined else (read_only_root | ternary('strict', 'full')) %}
 {% set protect_home_default = security.protect_home if security.protect_home is defined else 'yes' %}

@@ -147,6 +147,28 @@ properties:
         minimum: 1
   service_namespace:
     type: string
+  service_network_policy:
+    type: object
+    properties:
+      enabled:
+        type: boolean
+      policy_types:
+        type: array
+        items:
+          type: string
+          enum: [Ingress, Egress]
+      ingress:
+        type: array
+        items:
+          type: object
+      egress:
+        type: array
+        items:
+          type: object
+    description: >-
+      Optional overrides for the generated Kubernetes NetworkPolicy. When
+      omitted the renderer emits a strict default that allows ingress from the
+      service namespace and unrestricted egress.
   service_replicas:
     type: integer
   service_storage_gb:
@@ -297,6 +319,12 @@ properties:
               items:
                 type: string
                 enum: [docker, podman, kubernetes, proxmox, baremetal]
+              deprecated: true
+            runtimes:
+              type: array
+              items:
+                type: string
+                enum: [docker, podman, kubernetes, proxmox, baremetal]
             medium:
               type: string
             size:
@@ -327,6 +355,31 @@ properties:
         default: true
       rotation_timestamp:
         type: string
+      items:
+        type: array
+        items:
+          type: object
+          required:
+            - name
+          properties:
+            name:
+              type: string
+            type:
+              type: string
+              enum: [env, file]
+            value:
+              type: string
+            content:
+              type: string
+            target:
+              type: string
+            mode:
+              type: string
+        description: >-
+          Unified secret declarations. Each entry must declare a ``name`` and
+          either provide a ``value`` for environment variables or ``content`` for
+          file-based secrets. The optional ``type`` field defaults to ``env`` when
+          omitted.
       env:
         type: array
         items:
@@ -337,6 +390,7 @@ properties:
               type: string
             value:
               type: string
+        deprecated: true
       files:
         type: array
         items:
@@ -353,6 +407,7 @@ properties:
               type: string
             mode:
               type: string
+        deprecated: true
       shred_waiver_reason:
         type: string
         description: >-

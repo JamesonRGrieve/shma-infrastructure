@@ -22,14 +22,14 @@ deny[msg] {
 # Secrets require a namespace to ensure scoped K8s resources.
 deny[msg] {
   input.secrets
-  (count(input.secrets.env) > 0 or count(input.secrets.files) > 0)
+  (count(secrets_env_entries) > 0 or count(secrets_file_entries) > 0)
   not input.service_namespace
   msg := "service_namespace must be defined when secrets are present"
 }
 
 # Enforce basic complexity requirements for inline secret values.
 deny[msg] {
-  secret := input.secrets.env[_]
+  secret := secrets_env_entries[_]
   value := secret.value
   not secret_complex(value)
   msg := sprintf(
@@ -65,6 +65,57 @@ secret_character_classes(value)[class] {
 secret_character_classes(value)[class] {
   re_match("[^A-Za-z0-9]", value)
   class := "special"
+}
+
+secrets_env_entries[secret] {
+  items := input.secrets.items
+  items != null
+  some i
+  item := items[i]
+  t := lower(item.type)
+  t == "env"
+  secret := item
+}
+
+secrets_env_entries[secret] {
+  not input.secrets.items
+  some i
+  secret := input.secrets.env[i]
+}
+
+secrets_env_entries[secret] {
+  items := input.secrets.items
+  items != null
+  some i
+  item := items[i]
+  not item.type
+  secret := item
+}
+
+secrets_file_entries[secret] {
+  items := input.secrets.items
+  items != null
+  some i
+  item := items[i]
+  t := lower(item.type)
+  t == "file"
+  secret := item
+}
+
+secrets_file_entries[secret] {
+  not input.secrets.items
+  some i
+  secret := input.secrets.files[i]
+}
+
+secrets_file_entries[secret] {
+  items := input.secrets.items
+  items != null
+  some i
+  item := items[i]
+  not item.type
+  item.target
+  secret := item
 }
 
 # Resource requests must stay within supported bounds.

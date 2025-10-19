@@ -39,7 +39,6 @@ mounts:
   ephemeral_mounts:
     - name: runtime-run
       path: /run/pvc
-      apply_to: [docker, podman, kubernetes, proxmox, baremetal]
       medium: Memory
       size: 128Mi
 health:
@@ -55,5 +54,4 @@ kubernetes:
     storageClassName: fast
 secrets:
   shred_after_apply: true
-  env: []
-  files: []
+  items: []

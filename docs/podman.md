@@ -4,8 +4,9 @@ Deploy services using Podman Quadlets with environment files, optional user scop
 
 ## Enhancements
 
-- `quadlet_scope` selects system-wide (`/etc/containers/systemd`) or per-user (`~/.config/containers/systemd`) installation.
-- Secrets from the contract populate a dedicated environment file (for `secrets.env`) and optional `secrets/` directory, mounted read-only into the container.
+- `quadlet_scope` selects system-wide (`/etc/containers/systemd`) or per-user (`$HOME/.config/containers/systemd`) installation.
+- Secrets from the contract populate a dedicated environment file for entries declared with `type: env` and an optional `secrets/`
+  directory for `type: file`, mounted read-only into the container.
 - Health checks map directly to `HealthCmd/HealthInterval/HealthTimeout/HealthRetries` derived from `health.cmd`.
 - Host policy defaults to rejecting unsigned/unknown registries and the local Docker engine, keeping pulls scoped to approved sources.
 - `service_volumes.host_path` entries render as direct bind mounts so containers remain ephemeral while state lives on the host.
@@ -72,14 +73,16 @@ NoNewPrivileges=yes
 WantedBy=multi-user.target default.target
 ```
 
-For `quadlet_scope: user`, the `.container` unit and environment file live under `~/.config/containers/systemd/`, while secret files are staged in `~/.config/containers/systemd/secrets/`. Enable lingering or ensure user services start at boot so the unit remains active.
+For `quadlet_scope: user`, the `.container` unit and environment file live under `$HOME/.config/containers/systemd/`, while secret
+files are staged in `$HOME/.config/containers/systemd/secrets/`. Enable lingering or ensure user services start at boot so the unit
+remains active.
 
 ## Deployment workflow
 
 `roles/common/apply_runtime/tasks/podman.yml`:
 
 1. Computes the target directories based on `quadlet_scope`.
-2. Writes the env file for `secrets.env` entries and optional secret files (with `0400` default permissions).
+2. Writes the env file for `type: env` entries and optional secret files (with `0400` default permissions).
 3. Copies the `.container` unit.
 4. Executes `systemd` tasks with the correct scope and reloads daemons.
 5. Shreds rendered secrets by default; set `secrets.shred_after_apply: false` only when you provide a `secrets.shred_waiver_reason`
@@ -117,8 +120,9 @@ systemctl --user start sample-service
 - Keep `docker-daemon` denied unless you must ingest images from the local engine; if so, override the transport mapping explicitly for that host.
 ### Secret transport differences
 
-Quadlet mirrors Docker's behaviour: `secrets.env` are exported as environment variables during the `systemd` start, while
-`secrets.files` create transient files. Kubernetes mounts everything as files. When moving a workload from Podman to Kubernetes,
-convert environment consumers to read from mounted files or replicate the values under `secrets.files`. Moving from Kubernetes
-back to Podman requires turning file-based reads into environment variables or continuing to use `secrets.files` so Quadlet
+Quadlet mirrors Docker's behaviour: secrets declared with `type: env` are exported as environment variables during the `systemd`
+start, while
+`type: file` entries create transient files. Kubernetes mounts everything as files. When moving a workload from Podman to Kubernetes,
+convert environment consumers to read from mounted files or replicate the values under file-based secrets. Moving from Kubernetes
+back to Podman requires turning file-based reads into environment variables or continuing to use `type: file` entries so Quadlet
 renders the expected payloads.
