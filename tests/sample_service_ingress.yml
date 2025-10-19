@@ -1,7 +1,7 @@
 service_id: sample-service
 service_name: sample-service
 service_unit_name: sample-service
-service_image: docker.io/library/nginx:latest
+service_image: docker.io/library/nginx@sha256:2ed85f18cb2c6b49e191bcb6bf12c0c07d63f3937a05d9f5234170d4f8df5c94
 service_ip: 192.0.2.50
 service_ports:
   - target: 8080

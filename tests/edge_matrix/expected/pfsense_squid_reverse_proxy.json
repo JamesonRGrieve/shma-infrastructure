@@ -1,0 +1,40 @@
+{
+  "body": {
+    "mappings": [
+      {
+        "path": "/",
+        "peer": "app-one",
+        "servername": "app-one.example.test",
+        "tls": true
+      },
+      {
+        "path": "/metrics",
+        "peer": "metrics",
+        "servername": "metrics.example.test",
+        "tls": false
+      }
+    ],
+    "peers": [
+      {
+        "host": "198.51.100.10",
+        "name": "app-one",
+        "originserver": true,
+        "port": "8080",
+        "ssl": false
+      },
+      {
+        "host": "198.51.100.11",
+        "name": "metrics",
+        "originserver": true,
+        "port": "9090",
+        "ssl": true
+      }
+    ]
+  },
+  "body_format": "json",
+  "headers": {
+    "Authorization": "squid-subsystem-token"
+  },
+  "method": "POST",
+  "url": "https://edge-pfsense.local:443/api/v1/services/squid/reverse_proxy"
+}

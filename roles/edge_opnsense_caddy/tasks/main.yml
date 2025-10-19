@@ -6,6 +6,13 @@
       - opnsense_caddy_api_secret | length > 0
     fail_msg: "opnsense_caddy_api_key and opnsense_caddy_api_secret must be provided to configure OPNsense Caddy"
 
+- name: Enforce scoped OPNsense Caddy API key permissions
+  ansible.builtin.assert:
+    that:
+      - "'root' not in (opnsense_caddy_api_key | lower)"
+      - "'global' not in (opnsense_caddy_api_key | lower)"
+    fail_msg: "opnsense_caddy_api_key must target the Caddy subsystem instead of root/global access"
+
 - name: Initialize OPNsense Caddy payload containers
   ansible.builtin.set_fact:
     opnsense_caddy_routes: []

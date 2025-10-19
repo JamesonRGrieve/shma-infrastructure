@@ -1,0 +1,31 @@
+{
+  "edge_ingress_contracts": [
+    {
+      "service_id": "app-one",
+      "router_name": "app-one-router",
+      "router_entrypoint": "web",
+      "tls": true,
+      "tls_certresolver": "production",
+      "scheme": "http",
+      "path_prefix": "/",
+      "exports": {
+        "APP_FQDN": "app-one.example.test",
+        "APP_PORT": "8080",
+        "APP_BACKEND_IP": "198.51.100.10"
+      }
+    },
+    {
+      "service_id": "metrics",
+      "router_name": "metrics-router",
+      "router_entrypoint": "web",
+      "tls": false,
+      "scheme": "https",
+      "path_prefix": "/metrics",
+      "exports": {
+        "APP_FQDN": "metrics.example.test",
+        "APP_PORT": "9090",
+        "APP_BACKEND_IP": "198.51.100.11"
+      }
+    }
+  ]
+}

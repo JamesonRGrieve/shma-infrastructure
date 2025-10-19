@@ -124,6 +124,12 @@ jobs:
       - name: Validate systemd unit
         run: systemd-analyze verify ${{ steps.metadata.outputs.runtime_dir }}/baremetal.yml
 
+      - name: Enforce systemd unit hardening
+        run: |
+          python ci/validate_systemd_unit.py \
+            --service-definition "${{ matrix.service_file }}" \
+            "${{ steps.metadata.outputs.runtime_dir }}/baremetal.yml"
+
       - name: Render Kubernetes manifests
         run: ansible-playbook tests/render.yml -e runtime=kubernetes -e service_definition_file=${{ matrix.service_file }}
 

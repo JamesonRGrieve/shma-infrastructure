@@ -31,6 +31,14 @@ def gather_secret_values(service: dict) -> set[str]:
     secrets: set[str] = set()
     secret_block = service.get("secrets", {})
 
+    def _collect_candidates(item: dict) -> set[str]:
+        candidates: set[str] = set()
+        for field in ("value", "content"):
+            value = item.get(field)
+            if value:
+                candidates.add(str(value))
+        return candidates
+
     for item in secret_block.get("env", []) or []:
         _register_secret(secrets, item.get("value"))
 
@@ -38,16 +46,48 @@ def gather_secret_values(service: dict) -> set[str]:
         _register_secret(secrets, item.get("value"))
         _register_secret(secrets, item.get("content"))
 
+
     return secrets
+
+
+def _extract_quadlet_entries(content: str) -> tuple[set[str], set[str]]:
+    entries: set[str] = set()
+    paths: set[str] = set()
+
+    for line in content.splitlines():
+        key, _, value = line.partition("=")
+        if not value:
+            continue
+        key = key.strip()
+        value = value.strip()
+        if key in {"Environment", "EnvironmentFile", "Volume"}:
+            if value:
+                entries.add(value)
+        if key in {"EnvironmentFile", "Volume"}:
+            host_path, _, _ = value.partition(":")
+            host_path = host_path.strip()
+            if host_path:
+                paths.add(host_path)
+
+    return entries, paths
 
 
 def check_manifest(manifest_path: Path, secrets: set[str]) -> list[str]:
     content = manifest_path.read_text()
-    found = []
+    found: set[str] = set()
+
     for secret in secrets:
         if secret and secret in content:
-            found.append(secret)
-    return found
+            found.add(secret)
+
+    if "[Container]" in content and "[Service]" in content:
+        entries, paths = _extract_quadlet_entries(content)
+        for candidate in entries.union(paths):
+            for secret in secrets:
+                if secret and secret in candidate:
+                    found.add(secret)
+
+    return sorted(found)
 
 
 def build_parser() -> argparse.ArgumentParser:

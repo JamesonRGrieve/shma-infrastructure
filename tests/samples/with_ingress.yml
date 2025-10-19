@@ -1,6 +1,6 @@
 service_id: webapp
 service_name: Web Application
-service_image: ghcr.io/example/web:latest
+service_image: ghcr.io/example/web@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 exports:
   env:
     - name: BASE_URL

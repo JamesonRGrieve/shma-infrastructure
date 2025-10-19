@@ -6,6 +6,13 @@
       - opnsense_api_secret | length > 0
     fail_msg: "opnsense_api_key and opnsense_api_secret must be provided to configure HAProxy"
 
+- name: Enforce scoped OPNsense API key permissions
+  ansible.builtin.assert:
+    that:
+      - "'root' not in (opnsense_api_key | lower)"
+      - "'global' not in (opnsense_api_key | lower)"
+    fail_msg: "opnsense_api_key must target the HAProxy subsystem instead of root/global access"
+
 - name: Initialize OPNsense payload containers
   set_fact:
     opnsense_backends: []
@@ -70,14 +77,13 @@
     validate_certs: "{{ opnsense_api_verify_ssl }}"
     body_format: json
     status_code: 200
-    body:
-      backends: {{ opnsense_backends }}
-      frontends: {{ opnsense_frontends }}
+    body: "{{ {'backends': opnsense_backends, 'frontends': opnsense_frontends} | to_json }}"
   register: opnsense_bulk_import
   no_log: true
+  when: not (edge_ingress_skip_push | default(false) | bool)
 
 - name: Apply HAProxy configuration on OPNsense
-  when: opnsense_apply_changes
+  when: opnsense_apply_changes and not (edge_ingress_skip_push | default(false) | bool)
   uri:
     url: "{{ opnsense_api_scheme }}://{{ opnsense_api_host }}:{{ opnsense_api_port }}/api/haproxy/service/reconfigure"
     method: POST

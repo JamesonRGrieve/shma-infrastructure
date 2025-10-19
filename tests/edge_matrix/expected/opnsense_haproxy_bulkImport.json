@@ -1,0 +1,97 @@
+{
+  "body": {
+    "backends": [
+      {
+        "httpcheck_method": "GET",
+        "httpcheck_path": "/",
+        "mode": "http",
+        "name": "app-one",
+        "retries": 3,
+        "servers": [
+          {
+            "address": "198.51.100.10",
+            "name": "app-one-primary",
+            "port": "8080",
+            "ssl": "false",
+            "verify": "false"
+          }
+        ]
+      },
+      {
+        "httpcheck_method": "GET",
+        "httpcheck_path": "/metrics",
+        "mode": "http",
+        "name": "metrics",
+        "retries": 3,
+        "servers": [
+          {
+            "address": "198.51.100.11",
+            "name": "metrics-primary",
+            "port": "9090",
+            "ssl": "true",
+            "verify": "false"
+          }
+        ]
+      }
+    ],
+    "frontends": [
+      {
+        "binds": [
+          {
+            "address": "0.0.0.0",
+            "port": "80",
+            "ssl": "false"
+          },
+          {
+            "address": "0.0.0.0",
+            "port": "443",
+            "ssl": "true"
+          }
+        ],
+        "default_backend": "app-one",
+        "mode": "http",
+        "name": "app-one-router",
+        "rules": [
+          {
+            "type": "Host",
+            "value": "app-one.example.test"
+          }
+        ],
+        "tls_certificate": "tls-cert-haproxy",
+        "tls_enabled": "true"
+      },
+      {
+        "binds": [
+          {
+            "address": "0.0.0.0",
+            "port": "80",
+            "ssl": "false"
+          },
+          {
+            "address": "0.0.0.0",
+            "port": "443",
+            "ssl": "true"
+          }
+        ],
+        "default_backend": "metrics",
+        "mode": "http",
+        "name": "metrics-router",
+        "rules": [
+          {
+            "type": "Host",
+            "value": "metrics.example.test"
+          },
+          {
+            "type": "PathPrefix",
+            "value": "/metrics"
+          }
+        ],
+        "tls_certificate": "",
+        "tls_enabled": "false"
+      }
+    ]
+  },
+  "body_format": "json",
+  "method": "POST",
+  "url": "https://edge-opnsense.local:443/api/haproxy/service/bulkImport"
+}

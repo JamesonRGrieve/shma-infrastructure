@@ -2,24 +2,21 @@ package shma.service
 
 deny[msg] {
   image := input.service_image
-  not image_pinned(image)
-  msg := sprintf("service_image %q must include a pinned tag or digest", [image])
+
+  not image_digest_pinned(image)
+  msg := sprintf("service_image %q must be pinned by immutable digest", [image])
 }
 
-image_pinned(image) {
+image_digest_pinned(image) {
   contains(image, "@sha256:")
-}
 
-image_pinned(image) {
-  contains(image, ":")
-  not endswith(lower(image), ":latest")
 }
 
 # Ensure LXC features are gated behind needs_container_runtime.
 deny[msg] {
   input.needs_container_runtime != true
   input.service_container.features
-  msg := "service_container.features requires needs_container_runtime to be true"
+  msg := "service_container.features requires needs_container_runtime=true"
 }
 
 # Secrets require a namespace to ensure scoped K8s resources.
@@ -100,4 +97,35 @@ deny[msg] {
   port.host_ip
   port.host_ip == "0.0.0.0"
   msg := sprintf("service port %v exposes 0.0.0.0; use a specific host_ip", [port.target])
+}
+
+# Prevent implicit port exposure when no service_ports declared.
+deny[msg] {
+  not service_ports_defined
+  services := object.get(input, "services", [])
+  service := services[_]
+  ports := object.get(service, "ports", [])
+  count(ports) > 0
+  msg := "services[*].ports requires service_ports to be defined"
+}
+
+service_ports_defined {
+  ports := object.get(input, "service_ports", [])
+  count(ports) > 0
+}
+
+# Ensure hostPath style mounts are only used intentionally.
+deny[msg] {
+  volume := input.service_volumes[_]
+  volume.host_path_type
+  not volume.host_path
+  msg := sprintf("service volume %q sets host_path_type without host_path", [volume.name])
+}
+
+deny[msg] {
+  volume := input.service_volumes[_]
+  path := volume.host_path
+  path != null
+  not startswith(path, "/")
+  msg := sprintf("service volume %q host_path %q must be an absolute path", [volume.name, path])
 }
