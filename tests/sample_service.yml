@@ -93,6 +93,7 @@ runtime_templates:
   baremetal: ../templates/baremetal.yml.j2
 secrets:
   shred_after_apply: true
+  rotation_timestamp: "2024-08-20T12:34:56Z"
   env:
     - name: SAMPLE_SERVICE_TOKEN
       value: super-secret-token
