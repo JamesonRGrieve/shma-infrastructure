@@ -383,3 +383,17 @@ allOf:
       properties:
         needs_container_runtime:
           const: true
+  - if:
+      properties:
+        service_volumes:
+          type: array
+          contains:
+            type: object
+            required:
+              - host_path
+    then:
+      properties:
+        kubernetes:
+          not:
+            required:
+              - pvc

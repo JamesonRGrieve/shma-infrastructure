@@ -1,0 +1,144 @@
+---
+- name: Validate Kubernetes manifest secrets and probes
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  vars:
+    runtime: kubernetes
+  tasks:
+    - name: Load sample service definition
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/sample_service.yml"
+
+    - name: Render Kubernetes runtime
+      ansible.builtin.include_role:
+        name: roles/common/render_runtime
+
+    - name: Read rendered manifest
+      ansible.builtin.slurp:
+        src: "{{ runtime_config_path }}"
+      register: rendered_manifest
+
+    - name: Parse manifest documents
+      ansible.builtin.set_fact:
+        manifest_documents: "{{ rendered_manifest.content | b64decode | from_yaml_all | list }}"
+
+    - name: Filter Kubernetes resources
+      ansible.builtin.set_fact:
+        kubernetes_resources: "{{ manifest_documents | reject('equalto', None) | list }}"
+
+    - name: Determine deployment metadata
+      ansible.builtin.set_fact:
+        deployment_name: "{{ service_name | default(service_id) }}"
+        expected_health_cmd: "{{ health.cmd | default(['true']) }}"
+
+    - name: Collect Kubernetes resources by kind
+      ansible.builtin.set_fact:
+        deployment_resources: "{{ kubernetes_resources | selectattr('kind', '==', 'Deployment') | selectattr('metadata.name', '==', deployment_name) | list }}"
+        env_secret_resources: "{{ kubernetes_resources | selectattr('kind', '==', 'Secret') | selectattr('metadata.name', '==', deployment_name ~ '-env') | list }}"
+        file_secret_resources: "{{ kubernetes_resources | selectattr('kind', '==', 'Secret') | selectattr('metadata.name', '==', deployment_name ~ '-files') | list }}"
+        pvc_resources: "{{ kubernetes_resources | selectattr('kind', '==', 'PersistentVolumeClaim') | list }}"
+
+    - name: Validate environment secret layout
+      ansible.builtin.assert:
+        that:
+          - env_secret_resources | length == 1
+          - env_secret_resources[0].stringData.SAMPLE_SERVICE_TOKEN is defined
+          - env_secret_resources[0].stringData.SAMPLE_SERVICE_TOKEN == 'super-secret-token'
+          - "'tls-cert' not in env_secret_resources[0].stringData"
+        fail_msg: "Environment secrets must reside in the <service>-env secret."
+
+    - name: Validate file secret layout
+      ansible.builtin.assert:
+        that:
+          - file_secret_resources | length == 1
+          - file_secret_resources[0].stringData['tls-cert'] is defined
+          - file_secret_resources[0].stringData['tls-cert'] | length > 0
+          - "'SAMPLE_SERVICE_TOKEN' not in file_secret_resources[0].stringData"
+        fail_msg: "File secrets must reside in the <service>-files secret."
+
+    - name: Ensure PVC excluded when hostPath is configured
+      ansible.builtin.assert:
+        that:
+          - pvc_resources | length == 0
+        fail_msg: "PersistentVolumeClaims must be omitted when hostPath storage is requested."
+
+    - name: Ensure deployment resource rendered
+      ansible.builtin.assert:
+        that:
+          - deployment_resources | length == 1
+        fail_msg: "Expected a single Deployment resource in the manifest."
+
+    - name: Extract deployment details
+      ansible.builtin.set_fact:
+        deployment_resource: "{{ deployment_resources[0] }}"
+        container_specs: "{{ deployment_resources[0].spec.template.spec.containers | default([]) }}"
+        pod_volumes: "{{ deployment_resources[0].spec.template.spec.volumes | default([]) }}"
+
+    - name: Validate deployment annotations and container presence
+      ansible.builtin.assert:
+        that:
+          - container_specs | length > 0
+          - deployment_resource.spec.template.metadata.annotations['shma.dev/secrets-rotation'] == secrets.rotation_timestamp
+        fail_msg: "Deployment must contain containers and the rotation annotation."
+
+    - name: Select primary container
+      ansible.builtin.set_fact:
+        primary_container: "{{ container_specs[0] }}"
+        container_env: "{{ container_specs[0].env | default([]) }}"
+        container_volume_mounts: "{{ container_specs[0].volumeMounts | default([]) }}"
+
+    - name: Locate env entries for assertions
+      ansible.builtin.set_fact:
+        secret_env_entry_list: "{{ container_env | selectattr('name', '==', 'SAMPLE_SERVICE_TOKEN') | list }}"
+        rotation_env_entry_list: "{{ container_env | selectattr('name', '==', 'SHMA_SECRETS_ROTATION') | list }}"
+        cps_env_entry_list: "{{ container_env | selectattr('name', '==', 'CONNECTIONS_PER_SECOND') | list }}"
+
+    - name: Validate environment wiring for secrets and rate limits
+      ansible.builtin.assert:
+        that:
+          - secret_env_entry_list | length == 1
+          - secret_env_entry_list[0].valueFrom.secretKeyRef.name == deployment_name ~ '-env'
+          - rotation_env_entry_list | length == 1
+          - rotation_env_entry_list[0].value == secrets.rotation_timestamp
+          - cps_env_entry_list | length == 1
+          - cps_env_entry_list[0].value == (service_resources.connections_per_second | string)
+        fail_msg: "Container environment variables must include rotation and rate limit markers."
+
+    - name: Validate file secret mounts
+      ansible.builtin.set_fact:
+        file_mounts: "{{ container_volume_mounts | selectattr('name', '==', 'secret-files') | list }}"
+
+    - name: Assert file secret mounts present
+      ansible.builtin.assert:
+        that:
+          - file_mounts | selectattr('subPath', '==', 'tls-cert') | list | length == 1
+          - file_mounts | selectattr('mountPath', '==', '/etc/sample-service/certs/tls.crt') | list | length == 1
+        fail_msg: "File secrets must mount using the shared secret-files volume."
+
+    - name: Validate secret volume wiring
+      ansible.builtin.set_fact:
+        secret_volume_entries: "{{ pod_volumes | selectattr('name', '==', 'secret-files') | list }}"
+        data_volume_entries: "{{ pod_volumes | selectattr('name', '==', 'data') | list }}"
+
+    - name: Assert secret volume configuration
+      ansible.builtin.assert:
+        that:
+          - secret_volume_entries | length == 1
+          - secret_volume_entries[0].secret.secretName == deployment_name ~ '-files'
+          - secret_volume_entries[0].secret['items'] | selectattr('key', '==', 'tls-cert') | list | length == 1
+        fail_msg: "Deployment must project the file secrets volume."
+
+    - name: Assert hostPath volume replaces PVC
+      ansible.builtin.assert:
+        that:
+          - data_volume_entries | length == 1
+          - data_volume_entries[0].hostPath.path == service_volumes[0].host_path
+        fail_msg: "HostPath volume should back the primary data mount."
+
+    - name: Validate health probe commands
+      ansible.builtin.assert:
+        that:
+          - primary_container.livenessProbe.exec.command == expected_health_cmd
+          - primary_container.readinessProbe.exec.command == expected_health_cmd
+        fail_msg: "Liveness and readiness probes must reuse the declared health.cmd."

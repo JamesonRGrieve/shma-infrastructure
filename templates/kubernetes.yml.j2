@@ -1,5 +1,6 @@
+#jinja2: lstrip_blocks: True, trim_blocks: True
 {% set svc_name = service_name | default(service_id) %}
-{% set namespace = service_namespace | default('default') %}
+{% set svc_namespace = service_namespace | default('default') %}
 {% set mounts_config = mounts | default({}) %}
 {% set ephemeral_mounts = mounts_config.ephemeral_mounts | default([]) %}
 {% set default_apply_targets = ['docker', 'podman', 'kubernetes', 'proxmox', 'baremetal'] %}
@@ -13,7 +14,8 @@
 {% set allow_priv_escalation = security.allow_privilege_escalation if security.allow_privilege_escalation is defined else (not no_new_privs) %}
 {% set ingress_spec = ingress | default({}) %}
 {% set ingress_routes = ingress_spec.routes | default([]) %}
-{% set ingress_enabled = (ingress_spec.enabled if ingress_spec is mapping and ingress_spec.enabled is not none else (ingress_routes | length > 0)) %}
+{% set ingress_flag = ingress_spec.get('enabled') if ingress_spec is mapping else none %}
+{% set ingress_enabled = (ingress_flag if ingress_flag is not none else (ingress_routes | length > 0)) %}
 {% set k8s_ephemeral = namespace(items=[]) %}
 {% for mount in ephemeral_mounts %}
   {% set apply_targets = mount.apply_to | default(default_apply_targets) %}
@@ -31,7 +33,8 @@
 {% endfor %}
 {% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] %}
 {% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
-{% set inline_env = service_env | default([]) %}
+{% set inline_env = service_env | default([]) | list %}
+{% set inline_env_ns = namespace(items=inline_env) %}
 {% set env_secret_name = svc_name + '-env' %}
 {% set file_secret_name = svc_name + '-files' %}
 {% set health_cmd = health.cmd | default(['true']) %}
@@ -60,52 +63,52 @@
 {% set storage_size = '1Gi' %}
 {% endif %}
 {% set volume_mount_path = volume_config.target if volume_config is mapping and volume_config.target is defined else '/data' %}
-{% if secret_env %}
+{%- if secret_env -%}
 ---
 apiVersion: v1
 kind: Secret
 metadata:
   name: {{ env_secret_name }}
-  namespace: {{ namespace }}
+  namespace: {{ svc_namespace }}
 type: Opaque
 stringData:
 {% for item in secret_env %}
   {{ item.name }}: {{ item.value | to_json }}
 {% endfor %}
-{% endif %}
-{% if file_secrets %}
+{% endif -%}
+{%- if file_secrets -%}
 ---
 apiVersion: v1
 kind: Secret
 metadata:
   name: {{ file_secret_name }}
-  namespace: {{ namespace }}
+  namespace: {{ svc_namespace }}
 type: Opaque
 stringData:
 {% for secret in file_secrets %}
   {{ secret.name }}: {{ (secret.value | default(secret.content) | default('', true)) | to_json }}
 {% endfor %}
-{% endif %}
-{% if not use_host_path %}
+{% endif -%}
+{%- if not use_host_path -%}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ svc_name }}-data
-  namespace: {{ namespace }}
+  namespace: {{ svc_namespace }}
 spec:
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
       storage: {{ storage_size }}
-{% endif %}
+{% endif -%}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ svc_name }}
-  namespace: {{ namespace }}
+  namespace: {{ svc_namespace }}
 spec:
   replicas: {{ replicas }}
   selector:
@@ -138,6 +141,13 @@ spec:
                 - {{ cap }}
 {% endfor %}
 {% endif %}
+{% if secrets is defined and secrets.rotation_timestamp is defined and secrets.rotation_timestamp is not none %}
+  {% set _ = inline_env_ns.items.append({'name': 'SHMA_SECRETS_ROTATION', 'value': secrets.rotation_timestamp | string}) %}
+{% endif %}
+{% if connections_per_second is not none %}
+  {% set _ = inline_env_ns.items.append({'name': 'CONNECTIONS_PER_SECOND', 'value': connections_per_second | string}) %}
+{% endif %}
+{% set inline_env = inline_env_ns.items %}
 {% set has_secret_env = secret_env | length > 0 %}
 {% set has_inline_env = inline_env | length > 0 %}
 {% if has_secret_env or has_inline_env %}
@@ -154,18 +164,9 @@ spec:
 {% if has_inline_env %}
 {% for item in inline_env %}
             - name: {{ item.name }}
-              value: {{ item.value }}
+              value: {{ item.value | to_json }}
 {% endfor %}
-{% if secrets is defined and secrets.rotation_timestamp is defined and secrets.rotation_timestamp is not none %}
-            - name: SHMA_SECRETS_ROTATION
-              value: {{ secrets.rotation_timestamp | to_json }}
-
-{% if connections_per_second %}
-            - name: CONNECTIONS_PER_SECOND
-              value: "{{ connections_per_second }}"
-
 {% endif %}
-
 {% endif %}
           ports:
             - containerPort: {{ container_port }}
@@ -246,7 +247,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: {{ svc_name }}
-  namespace: {{ namespace }}
+  namespace: {{ svc_namespace }}
 spec:
   selector:
     app: {{ svc_name }}
@@ -268,7 +269,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ svc_name }}
-  namespace: {{ namespace }}
+  namespace: {{ svc_namespace }}
   labels:
     app: {{ svc_name }}
 spec:
