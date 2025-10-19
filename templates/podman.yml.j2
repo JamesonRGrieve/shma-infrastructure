@@ -1,18 +1,20 @@
-{% set unit = service_unit | default({}) %}
-{% set unit_description = unit.description | default('Managed container for ' ~ (service_name | default(service_id))) %}
+{% from '_common.j2' import with_defaults %}
+{% set _defaults_ctx = namespace(security=None, catalog=None) %}
+{% call(defaults, catalog) with_defaults(service_security, secrets) %}
+  {% set _defaults_ctx.security = defaults %}
+  {% set _defaults_ctx.catalog = catalog %}
+{% endcall %}
+{% set shma_security_defaults = _defaults_ctx.security %}
 {% set mounts_config = mounts | default({}) %}
 {% set ephemeral_mounts = mounts_config.ephemeral_mounts | default([]) %}
 {% set default_apply_targets = ['docker', 'podman', 'kubernetes', 'proxmox', 'baremetal'] %}
-{% set security = service_security | default({}) %}
-{% set default_run_user = security.run_as_user if security.run_as_user is defined else 65532 %}
-{% set default_run_group = security.run_as_group if security.run_as_group is defined else default_run_user %}
-{% set quadlet_user = security.user if security.user is defined else ((default_run_user | string) ~ ':' ~ (default_run_group | string)) %}
-{% set read_only_root = security.read_only_root_filesystem if security.read_only_root_filesystem is defined else true %}
-{% set drop_caps_default = security.capabilities_drop | default(['ALL']) %}
-{% if drop_caps_default is string %}{% set drop_caps_default = [drop_caps_default] %}{% endif %}
-{% set no_new_privs = security.no_new_privileges if security.no_new_privileges is defined else true %}
-{% set bounding_set = security.capability_bounding_set if security.capability_bounding_set is defined else [] %}
-{% if bounding_set is string %}{% set bounding_set = [bounding_set] %}{% endif %}
+{% set default_run_user = shma_security_defaults.run_user %}
+{% set default_run_group = shma_security_defaults.run_group %}
+{% set quadlet_user = shma_security_defaults.compose_user if shma_security_defaults.compose_user is not none else ((default_run_user | string) ~ ':' ~ (default_run_group | string)) %}
+{% set read_only_root = shma_security_defaults.read_only_root %}
+{% set drop_caps_default = shma_security_defaults.capabilities_drop %}
+{% set no_new_privs = shma_security_defaults.no_new_privileges %}
+{% set bounding_set = shma_security_defaults.capability_bounding_set %}
 {% set tmpfs_hardening_flags = ['nosuid', 'nodev', 'noexec'] %}
 {% set podman_tmpfs = namespace(entries=[]) %}
 {% for mount in ephemeral_mounts %}
@@ -61,6 +63,7 @@
   {% set inline_env = inline_env + [{'name': 'CONNECTIONS_PER_SECOND', 'value': resources.connections_per_second | string}] %}
 {% endif %}
 {% set auto_update_mode = quadlet_auto_update | default('none') %}
+{% set health_cmd = health | health_command %}
 [Unit]
 Description={{ unit_description }}
 After=network-online.target
@@ -106,7 +109,7 @@ Tmpfs={{ tmpfs_value }}
 {% for port in ports %}
 PublishPort={{ port.host_ip | default('') }}{% if port.host_ip is defined and port.host_ip | string | length > 0 %}:{% endif %}{{ port.published | default(port.target) }}:{{ port.target }}{% if port.protocol is defined %}/{{ port.protocol }}{% endif %}
 {% endfor %}
-HealthCmd={{ (health.cmd | default(['true'])) | join(' ') }}
+HealthCmd={{ health_cmd | join(' ') }}
 HealthInterval={{ health.interval | default('10s') }}
 HealthTimeout={{ health.timeout | default('5s') }}
 HealthRetries={{ health.retries | default(3) }}

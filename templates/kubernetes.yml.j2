@@ -1,17 +1,22 @@
 #jinja2: lstrip_blocks: True, trim_blocks: True
+{% from '_common.j2' import with_defaults %}
+{% set _defaults_ctx = namespace(security=None, catalog=None) %}
+{% call(defaults, catalog) with_defaults(service_security, secrets) %}
+  {% set _defaults_ctx.security = defaults %}
+  {% set _defaults_ctx.catalog = catalog %}
+{% endcall %}
+{% set shma_security_defaults = _defaults_ctx.security %}
 {% set svc_name = service_name | default(service_id) %}
 {% set svc_namespace = service_namespace | default('default') %}
 {% set mounts_config = mounts | default({}) %}
 {% set ephemeral_mounts = mounts_config.ephemeral_mounts | default([]) %}
 {% set default_apply_targets = ['docker', 'podman', 'kubernetes', 'proxmox', 'baremetal'] %}
-{% set security = service_security | default({}) %}
-{% set default_run_user = security.run_as_user if security.run_as_user is defined else 65532 %}
-{% set default_run_group = security.run_as_group if security.run_as_group is defined else default_run_user %}
-{% set read_only_root = security.read_only_root_filesystem if security.read_only_root_filesystem is defined else true %}
-{% set drop_caps_default = security.capabilities_drop | default(['ALL']) %}
-{% if drop_caps_default is string %}{% set drop_caps_default = [drop_caps_default] %}{% endif %}
-{% set no_new_privs = security.no_new_privileges if security.no_new_privileges is defined else true %}
-{% set allow_priv_escalation = security.allow_privilege_escalation if security.allow_privilege_escalation is defined else (not no_new_privs) %}
+{% set default_run_user = shma_security_defaults.run_user %}
+{% set default_run_group = shma_security_defaults.run_group %}
+{% set read_only_root = shma_security_defaults.read_only_root %}
+{% set drop_caps_default = shma_security_defaults.capabilities_drop %}
+{% set no_new_privs = shma_security_defaults.no_new_privileges %}
+{% set allow_priv_escalation = shma_security_defaults.allow_privilege_escalation %}
 {% set ingress_spec = ingress | default({}) %}
 {% set ingress_routes = ingress_spec.routes | default([]) %}
 {% set ingress_flag = ingress_spec.get('enabled') if ingress_spec is mapping else none %}
@@ -37,7 +42,7 @@
 {% set inline_env_ns = namespace(items=inline_env) %}
 {% set env_secret_name = svc_name + '-env' %}
 {% set file_secret_name = svc_name + '-files' %}
-{% set health_cmd = health.cmd | default(['true']) %}
+{% set health_cmd = health | health_command %}
 {% set health_interval_seconds = (health.interval | default('10s')) | regex_replace('s$', '') | int %}
 {% set health_timeout_seconds = (health.timeout | default('5s')) | regex_replace('s$', '') | int %}
 {% set health_retries = health.retries | default(3) %}
