@@ -96,11 +96,46 @@
 
 - name: Initialize AIDE database on Debian-based hosts
   ansible.builtin.command: aideinit
-  register: aide_init_result
-  changed_when: aide_init_result.rc == 0
+  async: "{{ hardening_aide_init_timeout if hardening_use_async_aide else omit }}"
+  poll: "{{ 0 if hardening_use_async_aide else omit }}"
+  register: aide_init_debian_start
   when:
     - ansible_facts.packages.get('aide') is defined
     - not hardening_aide_db.stat.exists
+
+- name: Wait for AIDE initialization to finish on Debian hosts
+  ansible.builtin.async_status:
+    jid: "{{ aide_init_debian_start.ansible_job_id }}"
+  register: aide_init_debian_result
+  until: aide_init_debian_result.finished
+  retries: "{{ hardening_aide_async_retries | int }}"
+  delay: "{{ hardening_aide_async_poll_interval | int }}"
+  when:
+    - ansible_facts.packages.get('aide') is defined
+    - not hardening_aide_db.stat.exists
+    - hardening_use_async_aide
+    - aide_init_debian_start.ansible_job_id is defined
+  failed_when: >-
+    aide_init_debian_result.finished and (aide_init_debian_result.rc | default(0)) != 0
+  changed_when: >-
+    aide_init_debian_result.finished and (aide_init_debian_result.rc | default(0)) == 0
+
+- name: Capture synchronous AIDE initialization result on Debian hosts
+  ansible.builtin.set_fact:
+    aide_init_debian: "{{ aide_init_debian_start }}"
+  when:
+    - ansible_facts.packages.get('aide') is defined
+    - aide_init_debian_start is defined
+    - (not hardening_use_async_aide) or (aide_init_debian_start.ansible_job_id is not defined)
+
+- name: Capture asynchronous AIDE initialization result on Debian hosts
+  ansible.builtin.set_fact:
+    aide_init_debian: "{{ aide_init_debian_result }}"
+  when:
+    - ansible_facts.packages.get('aide') is defined
+    - hardening_use_async_aide
+    - aide_init_debian_result is defined
+    - aide_init_debian_start.ansible_job_id is defined
 
 - name: Record AIDE database initialization on Debian hosts
   ansible.builtin.set_fact:
@@ -109,6 +144,6 @@
         exists: true
   when:
     - ansible_facts.packages.get('aide') is defined
-    - aide_init_result is defined
-    - aide_init_result.rc == 0
+    - aide_init_debian is defined
+    - (aide_init_debian.rc | default(0)) == 0
 

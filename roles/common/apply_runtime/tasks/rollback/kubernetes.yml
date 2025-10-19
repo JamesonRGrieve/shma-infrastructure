@@ -1,0 +1,8 @@
+---
+- name: Revert Kubernetes manifests after failure
+  kubernetes.core.k8s:
+    state: absent
+    src: "{{ runtime_config_path }}"
+    namespace: "{{ k8s_namespace | default('default') }}"
+  when: runtime_config_path is defined
+  failed_when: false

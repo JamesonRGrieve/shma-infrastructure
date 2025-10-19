@@ -4,7 +4,7 @@ Deploy services using Docker Compose with secret-aware environment injection and
 
 ## What's new
 
-- Secrets defined in the service contract travel via the Compose CLI environment so sensitive values never touch disk.
+- Secrets defined in the service contract travel via the Compose CLI environment. Values are staged on disk during deployment and shredded afterward when `secrets.shred_after_apply` remains `true`.
 - File-based secrets render into `secrets/` and are attached via Compose `secrets` blocks.
 - `community.docker.docker_compose_v2` drives deployments to align with the modern Docker CLI plugin.
 - Health probes come directly from `health.cmd` ensuring parity with other runtimes.

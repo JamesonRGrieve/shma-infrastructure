@@ -1,0 +1,6 @@
+---
+- name: Determine default service IP for health checks
+  set_fact:
+    service_ip: "{{ ansible_default_ipv4.address }}"
+  when: service_ip is not defined or (service_ip | string | length) == 0
+  changed_when: false

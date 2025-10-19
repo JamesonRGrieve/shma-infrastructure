@@ -30,6 +30,19 @@
     edge_ingress_current_backend: "{{ merged_backend }}"
   no_log: true
   vars:
+    mtls_config: >-
+      {{
+        edge_ingress_contract.mtls
+        if edge_ingress_contract.mtls is defined and edge_ingress_contract.mtls is mapping
+        else {}
+      }}
+    normalized_mtls: >-
+      {{
+        (mtls_config | default({}))
+        | combine({'required': (mtls_config.required | default(true)) | bool}, recursive=False)
+        if (mtls_config | default({})) | length > 0
+        else {}
+      }}
     merged_backend: >-
       {{ {
         'service_id': edge_ingress_contract.service_id | default(edge_ingress_contract_exports.APP_FQDN),
@@ -42,6 +55,7 @@
         'middlewares': edge_ingress_contract.middlewares | default([]),
         'pass_host_header': edge_ingress_contract.pass_host_header | default(True) | bool,
         'preserve_host': edge_ingress_contract.preserve_host | default(False) | bool,
+        'mtls': normalized_mtls,
         'exports': edge_ingress_contract_exports,
         'service_labels': edge_ingress_contract.service_labels | default({})
       } | to_json | from_json }}
@@ -53,6 +67,19 @@
     fail_msg: >-
       TLS settings for {{ edge_ingress_contract.service_id | default(edge_ingress_contract_exports.APP_FQDN) }} must only define
       TLS configuration when tls is true
+
+- name: Validate mutual TLS contract for {{ edge_ingress_contract.service_id | default('unnamed service') }}
+  ansible.builtin.assert:
+    that:
+      - edge_ingress_current_backend.mtls is mapping
+      - edge_ingress_current_backend.tls | bool
+      - (edge_ingress_current_backend.mtls.ca_secret | default('') | string | trim | length) > 0
+      - edge_ingress_current_backend.mtls.required in [true, false]
+    fail_msg: >-
+      Mutual TLS for {{ edge_ingress_contract.service_id | default(edge_ingress_contract_exports.APP_FQDN) }} requires tls enabled, a ca_secret, and a boolean required flag.
+  when:
+    - edge_ingress_current_backend.mtls is defined
+    - edge_ingress_current_backend.mtls | length > 0
 
 - name: Accumulate ingress backends for {{ edge_ingress_contract.service_id | default('unnamed service') }}
   set_fact:

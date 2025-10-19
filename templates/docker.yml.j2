@@ -1,3 +1,11 @@
+{% from '_common.j2' import with_defaults %}
+{% set _defaults_ctx = namespace(security=None, catalog=None) %}
+{% call(defaults, catalog) with_defaults(service_security, secrets) %}
+  {% set _defaults_ctx.security = defaults %}
+  {% set _defaults_ctx.catalog = catalog %}
+{% endcall %}
+{%- set shma_security_defaults = _defaults_ctx.security %}
+{%- set shma_secret_catalog = _defaults_ctx.catalog %}
 {%- set mounts_config = mounts | default({}) %}
 {%- set ephemeral_mounts = mounts_config.ephemeral_mounts | default([]) %}
 {%- set default_apply_targets = ['docker', 'podman', 'kubernetes', 'proxmox', 'baremetal'] %}
@@ -12,6 +20,8 @@
 {%- set default_apparmor = security.apparmor_profile if security.apparmor_profile is defined else 'docker-default' %}
 {%- set allowed_apparmor_profiles = security.allowed_apparmor_profiles if security.allowed_apparmor_profiles is defined else ['docker-default', 'unconfined'] %}
 {%- if allowed_apparmor_profiles is string %}{%- set allowed_apparmor_profiles = [allowed_apparmor_profiles] %}{%- endif %}
+{%- set defined_secret_env_names = shma_secret_catalog.env_names | default([]) %}
+{%- set defined_file_secret_names = shma_secret_catalog.file_names | default([]) %}
 {%- set docker_tmpfs = namespace(items=[]) %}
 {%- for mount in ephemeral_mounts %}
   {%- set apply_targets = mount.apply_to | default(default_apply_targets) %}
@@ -177,7 +187,7 @@ services:
 {% set svc_health = svc.health if svc.health is defined else (health if loop.first and health is defined else None) %}
 {% if svc_health is not none %}
     healthcheck:
-      test: {{ svc_health.cmd | default(['true']) | to_json }}
+      test: {{ svc_health | health_command | to_json }}
       interval: {{ svc_health.interval | default('10s') }}
       timeout: {{ svc_health.timeout | default('5s') }}
       retries: {{ svc_health.retries | default(3) }}

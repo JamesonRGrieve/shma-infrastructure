@@ -32,7 +32,10 @@ runs:
         matrix_path = Path("ci/version_matrix.yml")
         matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
 
-        python_version = str(matrix["python"]["version"])
+        python_section = matrix["python"]
+        if lane not in python_section:
+          raise SystemExit(f"Lane '{lane}' is not defined for python in {matrix_path}")
+        python_version = str(python_section[lane]["version"])
         kubectl_versions = matrix["kubectl"]
         collections = matrix["collections"]
 
