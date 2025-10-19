@@ -22,6 +22,23 @@ def load_matrix() -> Dict[str, object]:
 MATRIX = load_matrix()
 
 
+def _python_prefixes() -> List[str]:
+    prefixes = []
+    python_section = MATRIX.get("python", {})
+
+    if not isinstance(python_section, dict):
+        return prefixes
+
+    if "prefix" in python_section:
+        prefixes.append(str(python_section["prefix"]))
+
+    for value in python_section.values():
+        if isinstance(value, dict) and "prefix" in value:
+            prefixes.append(str(value["prefix"]))
+
+    return sorted(set(prefixes))
+
+
 def run_command(command: List[str]) -> subprocess.CompletedProcess[str]:
     """Execute *command* returning the completed process with UTF-8 text."""
 
@@ -30,9 +47,12 @@ def run_command(command: List[str]) -> subprocess.CompletedProcess[str]:
 
 def check_python() -> List[str]:
     version = sys.version.split()[0]
-    expected_prefix = str(MATRIX["python"]["prefix"])
-    if not version.startswith(expected_prefix):
-        return [f"Python {version} is outside the supported {expected_prefix} range."]
+    prefixes = _python_prefixes()
+    if prefixes and not any(version.startswith(prefix) for prefix in prefixes):
+        allowed = ", ".join(prefixes)
+        return [
+            "Python " f"{version} is outside the supported version prefixes: {allowed}."
+        ]
     return []
 
 

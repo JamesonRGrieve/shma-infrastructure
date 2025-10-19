@@ -45,22 +45,54 @@
   when: compose_secret_files | length > 0
   no_log: true
 
-- name: Deploy with Docker Compose v2
-  community.docker.docker_compose_v2:
-    project_src: "{{ runtime_output_dir }}"
-    files:
-      - "{{ runtime_config_path | basename }}"
-    state: present
-    pull: always
+- name: Verify Docker daemon is running
+  ansible.builtin.command: docker info
+  register: docker_daemon_info
+  changed_when: false
 
-  environment: "{{ compose_secret_env_map if compose_secret_env_map else omit }}"
-  no_log: "{{ compose_secret_env | length > 0 }}"
+- name: Deploy with Docker Compose v2
+  block:
+    - name: Deploy Docker Compose project
+      community.docker.docker_compose_v2:
+        project_src: "{{ runtime_output_dir }}"
+        files:
+          - "{{ runtime_config_path | basename }}"
+        state: present
+        pull: always
+
+      environment: "{{ compose_secret_env_map if compose_secret_env_map else omit }}"
+      no_log: "{{ compose_secret_env | length > 0 }}"
+  rescue:
+    - name: Remove failed Docker Compose deployment
+      community.docker.docker_compose_v2:
+        project_src: "{{ runtime_output_dir }}"
+        files:
+          - "{{ runtime_config_path | basename }}"
+        state: absent
+        remove_orphans: true
+      ignore_errors: true
+
+    - name: Report Docker Compose failure after cleanup
+      ansible.builtin.fail:
+        msg: >-
+          Docker Compose deployment failed and orphaned containers were removed:
+          {{ ansible_failed_result.msg | default(ansible_failed_result.stderr, true) }}
 
 - name: Remove Compose secret files after apply
-  file:
-    path: "{{ runtime_output_dir }}/secrets/{{ item.name }}"
-    state: absent
+  ansible.builtin.command:
+    cmd: "shred --remove=unlink --zero {{ runtime_output_dir }}/secrets/{{ item.name }}"
+  args:
+    removes: "{{ runtime_output_dir }}/secrets/{{ item.name }}"
   loop: "{{ compose_secret_files }}"
+  when:
+    - compose_secret_shred | bool
+    - compose_secret_files | length > 0
+  no_log: true
+
+- name: Remove Compose secret directory after apply
+  ansible.builtin.file:
+    path: "{{ runtime_output_dir }}/secrets"
+    state: absent
   when:
     - compose_secret_shred | bool
     - compose_secret_files | length > 0
