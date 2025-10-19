@@ -30,7 +30,12 @@ def gather_secret_values(service: dict) -> set[str]:
         secrets.update(_collect_candidates(item))
 
     for item in secret_block.get("files", []) or []:
-        secrets.update(_collect_candidates(item))
+
+        for field in ("value", "content"):
+            value = item.get(field)
+            if value:
+                secrets.add(str(value))
+
 
     return secrets
 

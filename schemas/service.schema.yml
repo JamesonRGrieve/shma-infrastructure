@@ -71,6 +71,7 @@ properties:
           type: string
         host_path:
           type: string
+          pattern: "^/"
         host_path_type:
           type: string
         target:
