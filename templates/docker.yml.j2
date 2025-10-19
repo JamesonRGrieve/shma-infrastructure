@@ -1,15 +1,23 @@
+{% from '_common.j2' import with_defaults %}
+{% set _defaults_ctx = namespace(security=None, catalog=None) %}
+{% call(defaults, catalog) with_defaults(service_security, secrets) %}
+  {% set _defaults_ctx.security = defaults %}
+  {% set _defaults_ctx.catalog = catalog %}
+{% endcall %}
+{%- set shma_security_defaults = _defaults_ctx.security %}
+{%- set shma_secret_catalog = _defaults_ctx.catalog %}
 {%- set mounts_config = mounts | default({}) %}
 {%- set ephemeral_mounts = mounts_config.ephemeral_mounts | default([]) %}
 {%- set default_apply_targets = ['docker', 'podman', 'kubernetes', 'proxmox', 'baremetal'] %}
-{%- set security = service_security | default({}) %}
-{%- set default_run_user = security.run_as_user if security.run_as_user is defined else 65532 %}
-{%- set default_run_group = security.run_as_group if security.run_as_group is defined else default_run_user %}
-{%- set compose_user_default = security.user if security.user is defined else ((default_run_user | string) ~ ':' ~ (default_run_group | string)) %}
-{%- set read_only_root = security.read_only_root_filesystem if security.read_only_root_filesystem is defined else true %}
-{%- set drop_caps_default = security.capabilities_drop | default(['ALL']) %}
-{%- if drop_caps_default is string %}{%- set drop_caps_default = [drop_caps_default] %}{%- endif %}
-{%- set no_new_privs = security.no_new_privileges if security.no_new_privileges is defined else true %}
-{%- set default_apparmor = security.apparmor_profile if security.apparmor_profile is defined else 'docker-default' %}
+{%- set default_run_user = shma_security_defaults.run_user %}
+{%- set default_run_group = shma_security_defaults.run_group %}
+{%- set compose_user_default = shma_security_defaults.compose_user if shma_security_defaults.compose_user is not none else ((default_run_user | string) ~ ':' ~ (default_run_group | string)) %}
+{%- set read_only_root = shma_security_defaults.read_only_root %}
+{%- set drop_caps_default = shma_security_defaults.capabilities_drop %}
+{%- set no_new_privs = shma_security_defaults.no_new_privileges %}
+{%- set default_apparmor = shma_security_defaults.apparmor_profile %}
+{%- set defined_secret_env_names = shma_secret_catalog.env_names | default([]) %}
+{%- set defined_file_secret_names = shma_secret_catalog.file_names | default([]) %}
 {%- set docker_tmpfs = namespace(items=[]) %}
 {%- for mount in ephemeral_mounts %}
   {%- set apply_targets = mount.apply_to | default(default_apply_targets) %}
@@ -115,7 +123,7 @@ services:
 {% if svc.working_dir is defined %}
     working_dir: {{ svc.working_dir }}
 {% endif %}
-  {% set svc_secret_env = svc.secret_env | default(secret_env) %}
+  {% set svc_secret_env = (svc.secret_env | default(secret_env)) | ensure_defined(defined_secret_env_names, 'environment secret for ' ~ (svc.name | default(primary_service_name))) %}
   {% set env_ns = namespace(files=[]) %}
   {% if svc.env_file is defined %}
   {% if svc.env_file is string %}
@@ -228,7 +236,7 @@ services:
 {% set svc_health = svc.health if svc.health is defined else (health if loop.first and health is defined else None) %}
 {% if svc_health is not none %}
     healthcheck:
-      test: {{ svc_health.cmd | default(['true']) | to_json }}
+      test: {{ svc_health | health_command | to_json }}
       interval: {{ svc_health.interval | default('10s') }}
       timeout: {{ svc_health.timeout | default('5s') }}
       retries: {{ svc_health.retries | default(3) }}
@@ -236,7 +244,7 @@ services:
       start_period: {{ svc_health.start_period }}
 {% endif %}
 {% endif %}
-{% set svc_file_secrets = svc.file_secrets | default(file_secrets) %}
+{% set svc_file_secrets = (svc.file_secrets | default(file_secrets)) | ensure_defined(defined_file_secret_names, 'file secret for ' ~ (svc.name | default(primary_service_name))) %}
 {% if svc_file_secrets %}
     secrets:
 {% for secret in svc_file_secrets %}
