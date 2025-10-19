@@ -11,7 +11,8 @@ Deploy services using Podman Quadlets with environment files, optional user scop
 - `service_volumes.host_path` entries render as direct bind mounts so containers remain ephemeral while state lives on the host.
 - `service_image` entries should be digest-pinned; combine with `quadlet_auto_update: none` to ensure only vetted images run.
 - `mounts.ephemeral_mounts` entries become `Tmpfs=` declarations hardened with `nosuid`, `nodev`, and `noexec` so containers only write to explicitly allowed paths.
-- Containers default to `User=65532:65532`, `ReadOnly=true`, `NoNewPrivileges=true`, `DropCapability=ALL`, and an empty `CapabilityBoundingSet`. Override with `service_security` only when workloads need extra permissions.
+- Containers default to `User=65532:65532`, `ReadOnly=true`, `NoNewPrivileges=true`, `DropCapability=ALL`, and omit `CapabilityBoundingSet` unless you provide an explicit allow-list through `service_security.capability_bounding_set`. Override with `service_security` only when workloads need extra permissions.
+- Set `service_security.user_namespace` to wire Podman's `UserNS=` quadlet directive (for example `keep-id` or `auto`).
 - `secrets.rotation_timestamp` (optional) is written as an inline environment variable so Quadlet restarts the container whenever you bump the value.
 
 - `service_resources.connections_per_second` surfaces as a `CONNECTIONS_PER_SECOND` variable so an nginx/envoy sidecar can
@@ -66,7 +67,6 @@ HealthRetries=3
 Restart=always
 TimeoutStartSec=900
 NoNewPrivileges=yes
-CapabilityBoundingSet=
 
 [Install]
 WantedBy=multi-user.target default.target
