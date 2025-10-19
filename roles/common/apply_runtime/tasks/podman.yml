@@ -4,11 +4,29 @@
     quadlet_effective_scope: "{{ quadlet_scope | default('system') }}"
     quadlet_unit_name: "{{ service_unit_name | default(service_id) }}"
 
+- name: Determine quadlet user home
+  set_fact:
+    quadlet_user_home: >-
+      {{
+        ansible_env.HOME
+        | default(ansible_user_dir, true)
+        | default(lookup('env', 'HOME'), true)
+      }}
+  when: quadlet_effective_scope == 'user'
+
+- name: Ensure quadlet user home is available
+  fail:
+    msg: >-
+      quadlet_scope is set to "user" but no HOME directory could be determined.
+  when:
+    - quadlet_effective_scope == 'user'
+    - quadlet_user_home is not defined or (quadlet_user_home | length == 0)
+
 - name: Resolve quadlet paths
   set_fact:
-    quadlet_base_dir: "{{ (quadlet_effective_scope == 'user') | ternary((ansible_env.HOME | default(lookup('env', 'HOME'))) + '/.config/containers/systemd', '/etc/containers/systemd') }}"
-    quadlet_env_path: "{{ ((quadlet_effective_scope == 'user') | ternary((ansible_env.HOME | default(lookup('env', 'HOME'))) + '/.config/containers/systemd', '/etc/containers/systemd')) + '/' + (service_name | default(service_id)) + '.env' }}"
-    quadlet_secret_dir: "{{ ((quadlet_effective_scope == 'user') | ternary((ansible_env.HOME | default(lookup('env', 'HOME'))) + '/.config/containers/systemd/secrets', '/etc/containers/systemd/secrets')) }}"
+    quadlet_base_dir: "{{ (quadlet_effective_scope == 'user') | ternary(quadlet_user_home + '/.config/containers/systemd', '/etc/containers/systemd') }}"
+    quadlet_env_path: "{{ ((quadlet_effective_scope == 'user') | ternary(quadlet_user_home + '/.config/containers/systemd', '/etc/containers/systemd')) + '/' + (service_name | default(service_id)) + '.env' }}"
+    quadlet_secret_dir: "{{ ((quadlet_effective_scope == 'user') | ternary(quadlet_user_home + '/.config/containers/systemd/secrets', '/etc/containers/systemd/secrets')) }}"
 
 - name: Resolve Quadlet secrets
   set_fact:
@@ -79,6 +97,11 @@
     mode: '0644'
   become: {{ (quadlet_effective_scope == 'system') | bool }}
 
+- name: Validate Podman availability
+  command: "{{ podman_binary | default('podman') }} --version"
+  changed_when: false
+  become: {{ (quadlet_effective_scope == 'system') | bool }}
+
 - name: Reload systemd daemon
   systemd:
     daemon_reload: yes
@@ -90,6 +113,7 @@
     enabled: yes
     state: started
     scope: "{{ quadlet_effective_scope }}"
+    daemon_reload: yes
 
 - name: Set service IP for health checks
   set_fact:
