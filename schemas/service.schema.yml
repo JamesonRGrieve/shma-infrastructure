@@ -344,6 +344,10 @@ properties:
           type: string
       apparmor_profile:
         type: string
+      allowed_apparmor_profiles:
+        type: array
+        items:
+          type: string
       private_tmp:
         type: boolean
       protect_system:
