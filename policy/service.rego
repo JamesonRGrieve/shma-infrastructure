@@ -19,7 +19,7 @@ image_pinned(image) {
 deny[msg] {
   input.needs_container_runtime != true
   input.service_container.features
-  msg := "service_container.features requires needs_container_runtime to be true"
+  msg := "service_container.features requires needs_container_runtime=true"
 }
 
 # Secrets require a namespace to ensure scoped K8s resources.

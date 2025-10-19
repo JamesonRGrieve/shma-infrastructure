@@ -6,6 +6,8 @@ from pathlib import Path
 
 import yaml
 from jsonschema import Draft202012Validator, ValidationError
+
+from .messages import FEATURES_REQUIRE_RUNTIME_MESSAGE
 from jsonschema import RefResolver
 
 
@@ -79,11 +81,7 @@ def validate_examples(validator: Draft202012Validator, examples_dir: Path) -> in
         if document.get("needs_container_runtime") is not True and document.get(
             "service_container", {}
         ).get("features"):
-            failures.append(
-                "{}: service_container.features requires needs_container_runtime=true".format(
-                    example
-                )
-            )
+            failures.append(f"{example}: {FEATURES_REQUIRE_RUNTIME_MESSAGE}")
 
     if failures:
         for failure in failures:

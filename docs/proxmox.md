@@ -112,6 +112,8 @@ line up without additional post-processing.
 - Explicit IP assignments keep host firewalls predictable.
 - Use Proxmox firewall rules or host-level filtering for exposed ports.
 - Keep `features` minimal; remove `nesting` when containerized workloads are not required. The default `keyctl=0` hardens the guest; add `keyctl=1` only when necessary.
+- Validators require `needs_container_runtime=true` before `service_container.features` render into the manifest, keeping LXC features disabled for host-based services.
+- LXC manifests stay unprivileged and avoid nested containers unless `service_security.allow_privilege_escalation: true` (or `service_security.no_new_privileges: false`) signals that the workload needs additional privileges.
 - Declare tmpfs-backed paths through `mounts.ephemeral_mounts` so only those directories remain writable at runtime.
 - Prefer API tokens with only the `vms:read`/`vms:write` and `nodes:read` permissions the playbook needs. Bind them to the specific node or pool that hosts the managed LXCs instead of granting full-cluster rights.
 
