@@ -72,15 +72,6 @@
       - runtime in runtime_templates.keys()
     fail_msg: "Runtime {{ runtime }} not supported by service {{ service_id }}"
 
-- name: Validate Kubernetes runtime requirements
-  assert:
-    that:
-      - service_ip is defined
-      - (service_ip | string | length) > 0
-    fail_msg: >-
-      Kubernetes runtime requires service_ip to be explicitly provided for health checks and routing.
-  when: runtime == 'kubernetes'
-
 - name: Validate Proxmox runtime requirements
   assert:
     that:

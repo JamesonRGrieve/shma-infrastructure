@@ -4,12 +4,14 @@ service_image: docker.io/library/postgres@sha256:3d9bd3fddf463b0d1d457769278e41b
 service_env:
   - name: POSTGRES_DB
     value: app
-  - name: POSTGRES_USER
-    value: app
 service_volumes:
   - name: data
     source: pvc-service-data
     target: /var/lib/postgresql/data
+  - name: backups
+    host_path: /var/backups/pvc
+    host_path_type: DirectoryOrCreate
+    target: /var/backups/pvc
 service_packages: []
 service_files: []
 service_services: []
@@ -32,8 +34,8 @@ exports:
       value: postgres://pvc.local:5432/app
 mounts:
   persistent_volumes:
-    - name: pgdata
-      path: /var/lib/pvc
+    - name: data
+      path: /var/lib/postgresql/data
     - name: backups
       path: /var/backups/pvc
   ephemeral_mounts:
@@ -43,9 +45,10 @@ mounts:
       size: 128Mi
 health:
   cmd:
-    - /bin/sh
+    - /usr/bin/env
+    - bash
     - -c
-    - "pg_isready"
+    - "pg_isready --host=127.0.0.1 --port=5432 --username=\"${POSTGRES_USER:-app}\""
 needs_container_runtime: true
 kubernetes:
   pvc:
@@ -54,4 +57,10 @@ kubernetes:
     storageClassName: fast
 secrets:
   shred_after_apply: true
-  items: []
+  items:
+    - name: POSTGRES_USER
+      type: env
+      value: "{{ vault_pvc_postgres_user }}"
+    - name: POSTGRES_PASSWORD
+      type: env
+      value: "{{ vault_pvc_postgres_password }}"
