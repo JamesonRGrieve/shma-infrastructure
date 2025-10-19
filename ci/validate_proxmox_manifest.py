@@ -6,6 +6,14 @@ import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+import json
+
+if __package__ in {None, ""}:  # pragma: no cover - compatibility for CLI execution
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from ci.messages import FEATURES_REQUIRE_RUNTIME_MESSAGE
+else:  # pragma: no cover - module import within package context
+    from .messages import FEATURES_REQUIRE_RUNTIME_MESSAGE
+
 try:  # pragma: no cover - exercised via fallback in tests when PyYAML is absent
     import yaml
 except ImportError:  # pragma: no cover - fallback for environments without PyYAML

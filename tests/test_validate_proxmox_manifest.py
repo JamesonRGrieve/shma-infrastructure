@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from ci import validate_proxmox_manifest as proxmox_validator
 

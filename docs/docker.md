@@ -4,13 +4,15 @@ Deploy services using Docker Compose with secret-aware environment injection and
 
 ## What's new
 
-- Secrets defined in the service contract travel via the Compose CLI environment so sensitive values never touch disk.
+- Secrets defined in the service contract travel via the Compose CLI environment. Values are staged on disk during deployment and shredded afterward when `secrets.shred_after_apply` remains `true`.
 - File-based secrets render into `secrets/` and are attached via Compose `secrets` blocks.
 - `community.docker.docker_compose_v2` drives deployments to align with the modern Docker CLI plugin.
 - Health probes come directly from `health.cmd` ensuring parity with other runtimes.
 - Host bind mounts are first-class: specify `service_volumes.host_path` to keep container filesystems disposable while state persists on the host.
 - Ephemeral tmpfs mounts defined under `mounts.ephemeral_mounts` render via Compose `tmpfs` entries so only declared paths remain writable.
 - Containers default to running as UID/GID `65532`, drop all capabilities, run as read-only, enforce `no-new-privileges`, and attach the Docker `apparmor=docker-default` profile. Override with `service_security` when a workload needs explicit grants or to supply a different AppArmor profile.
+- AppArmor profiles validate against `service_security.allowed_apparmor_profiles`, preventing typos from rendering a weaker policy than intended.
+- Set `service_security.init: true` or `services[].init: true` to enable Docker's `init` flag so a minimal init process handles orphaned children correctly.
 
 ## Prerequisites
 

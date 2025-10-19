@@ -118,6 +118,7 @@ kubectl apply --dry-run=client --validate=true -f /tmp/ansible-runtime/sample-se
 ## Deployment tips
 
 - Ensure the referenced namespace (`k8s_namespace`) exists before applying.
+- Verify that your CNI implementation enforces `NetworkPolicy` (for example Calico, Cilium, or kube-router) and author ingress/egress policies alongside the rendered manifests when workloads require isolation.
 - Use the generated `<service_id>-files` Secret for only the workloads that truly need those files; other deployments can skip mounting the `secret-files` volume entirely.
 - Adjust `service_replicas` to scale deployments and rely on the readiness probe before routing traffic.
 - Confirm etcd encryption at rest is enabled (`kubectl get apiserver cluster -o jsonpath='{.spec.encryptionConfiguration}'`) before applying rendered Secrets; otherwise, configure encryption providers or document the risk for operators.

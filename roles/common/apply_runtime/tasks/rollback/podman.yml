@@ -1,0 +1,33 @@
+---
+- name: Stop Quadlet unit after failure
+  systemd:
+    name: "{{ quadlet_unit_name }}"
+    state: stopped
+    scope: "{{ quadlet_effective_scope | default('system') }}"
+  when:
+    - quadlet_unit_name is defined
+    - quadlet_unit_name | length > 0
+  failed_when: false
+
+- name: Remove Quadlet environment file after failure
+  file:
+    path: "{{ quadlet_env_path }}"
+    state: absent
+  when:
+    - quadlet_env_path is defined
+    - quadlet_env_path | length > 0
+  become: {{ (quadlet_effective_scope | default('system')) == 'system' }}
+  failed_when: false
+
+- name: Remove Quadlet secret files after failure
+  file:
+    path: "{{ quadlet_secret_dir }}/{{ item.name }}"
+    state: absent
+  loop: "{{ quadlet_secret_files | default([]) }}"
+  when:
+    - quadlet_secret_dir is defined
+    - quadlet_secret_dir | length > 0
+    - quadlet_secret_files is defined
+    - quadlet_secret_files | length > 0
+  become: {{ (quadlet_effective_scope | default('system')) == 'system' }}
+  failed_when: false

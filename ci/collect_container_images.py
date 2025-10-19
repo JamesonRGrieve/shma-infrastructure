@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Iterable, Set
 
@@ -51,7 +52,15 @@ def _collect_from_quadlet(path: Path) -> Set[str]:
 
 
 def collect_images(service_file: Path, runtime_dir: Path) -> Set[str]:
-    service_doc = yaml.safe_load(service_file.read_text())
+    try:
+        service_doc = yaml.safe_load(service_file.read_text())
+    except yaml.YAMLError as exc:  # pragma: no cover - validated via CI workflows
+        raise SystemExit(f"Failed to parse YAML from {service_file}: {exc}") from exc
+
+    if service_doc is None:
+        print(f"{service_file} did not contain any data", file=sys.stderr)
+        return set()
+
     images = set(_iter_image_values(service_doc))
 
     images.update(_collect_from_yaml_file(runtime_dir / "docker.yml"))

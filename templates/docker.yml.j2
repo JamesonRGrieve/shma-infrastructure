@@ -1,3 +1,11 @@
+{% from '_common.j2' import with_defaults %}
+{% set _defaults_ctx = namespace(security=None, catalog=None) %}
+{% call(defaults, catalog) with_defaults(service_security, secrets) %}
+  {% set _defaults_ctx.security = defaults %}
+  {% set _defaults_ctx.catalog = catalog %}
+{% endcall %}
+{%- set shma_security_defaults = _defaults_ctx.security %}
+{%- set shma_secret_catalog = _defaults_ctx.catalog %}
 {%- set mounts_config = mounts | default({}) %}
 {%- set ephemeral_mounts = mounts_config.ephemeral_mounts | default([]) %}
 {%- set default_apply_targets = ['docker', 'podman', 'kubernetes', 'proxmox', 'baremetal'] %}
@@ -10,6 +18,10 @@
 {%- if drop_caps_default is string %}{%- set drop_caps_default = [drop_caps_default] %}{%- endif %}
 {%- set no_new_privs = security.no_new_privileges if security.no_new_privileges is defined else true %}
 {%- set default_apparmor = security.apparmor_profile if security.apparmor_profile is defined else 'docker-default' %}
+{%- set allowed_apparmor_profiles = security.allowed_apparmor_profiles if security.allowed_apparmor_profiles is defined else ['docker-default', 'unconfined'] %}
+{%- if allowed_apparmor_profiles is string %}{%- set allowed_apparmor_profiles = [allowed_apparmor_profiles] %}{%- endif %}
+{%- set defined_secret_env_names = shma_secret_catalog.env_names | default([]) %}
+{%- set defined_file_secret_names = shma_secret_catalog.file_names | default([]) %}
 {%- set docker_tmpfs = namespace(items=[]) %}
 {%- for mount in ephemeral_mounts %}
   {%- set apply_targets = mount.apply_to | default(default_apply_targets) %}
@@ -22,7 +34,7 @@
     {%- if entry not in docker_tmpfs.items %}{%- set _ = docker_tmpfs.items.append(entry) %}{%- endif %}
   {%- endif %}
 {%- endfor %}
-{% set services_list = services | default([{
+{% set services_list = services | default([{ 
   'name': service_name | default(service_id),
   'container_name': service_name | default(service_id),
   'image': service_image,
@@ -36,45 +48,25 @@
 {% set primary_service_name = service_name | default(service_id) %}
 {% set secret_env = secrets.env if secrets is defined and secrets.env is not none and secrets.env | length > 0 else [] %}
 {% set file_secrets = secrets.files if secrets is defined and secrets.files is not none and secrets.files | length > 0 else [] %}
+{% set rotation_timestamp = secrets.rotation_timestamp if secrets is defined and secrets.rotation_timestamp is not none else None %}
+{% set docker_defaults = {
+  'compose_user_default': compose_user_default,
+  'read_only_root': read_only_root,
+  'cap_drop_default': drop_caps_default,
+  'no_new_privs': no_new_privs,
+  'default_apparmor': default_apparmor,
+  'allowed_apparmor_profiles': allowed_apparmor_profiles,
+  'docker_tmpfs': docker_tmpfs.items,
+  'secret_env': secret_env,
+  'file_secrets': file_secrets,
+  'connections_per_second': connections_per_second,
+  'primary_service_name': primary_service_name,
+  'rotation_timestamp': rotation_timestamp,
+  'default_init': security.init if security.init is defined else None
+} %}
+{% set prepared_services = services_list | docker_compose_prepare_services(docker_defaults) %}
 services:
-{% for svc in services_list %}
-  {%- set svc_user = svc.user if svc.user is defined else compose_user_default %}
-  {%- set svc_read_only = svc.read_only if svc.read_only is defined else read_only_root %}
-  {%- set svc_cap_drop = svc.cap_drop if svc.cap_drop is defined else drop_caps_default %}
-  {%- if svc_cap_drop is string %}{%- set svc_cap_drop = [svc_cap_drop] %}{%- endif %}
-  {%- set svc_security_opt = namespace(items=[]) %}
-  {%- if svc.security_opt is defined and svc.security_opt %}
-    {%- for opt in svc.security_opt %}
-      {%- set _ = svc_security_opt.items.append(opt) %}
-    {%- endfor %}
-  {%- endif %}
-  {%- if no_new_privs %}
-    {%- if 'no-new-privileges:true' not in svc_security_opt.items %}
-      {%- set _ = svc_security_opt.items.append('no-new-privileges:true') %}
-    {%- endif %}
-  {%- endif %}
-  {%- set has_apparmor = false %}
-  {%- for opt in svc_security_opt.items %}
-    {%- if opt is string and opt.startswith('apparmor=') %}
-      {%- set has_apparmor = true %}
-    {%- endif %}
-  {%- endfor %}
-  {%- set svc_apparmor = svc.apparmor_profile if svc.apparmor_profile is defined else default_apparmor %}
-  {%- if svc_apparmor is not none and (svc_apparmor | string) | length > 0 %}
-    {%- set apparmor_opt = 'apparmor=' ~ svc_apparmor %}
-    {%- if not has_apparmor and apparmor_opt not in svc_security_opt.items %}
-      {%- set _ = svc_security_opt.items.append(apparmor_opt) %}
-    {%- endif %}
-  {%- endif %}
-  {%- set svc_tmpfs = namespace(items=[]) %}
-  {%- if svc.tmpfs is defined and svc.tmpfs %}
-    {%- for item in svc.tmpfs %}
-      {%- if item not in svc_tmpfs.items %}{%- set _ = svc_tmpfs.items.append(item) %}{%- endif %}
-    {%- endfor %}
-  {%- endif %}
-  {%- for entry in docker_tmpfs.items %}
-    {%- if entry not in svc_tmpfs.items %}{%- set _ = svc_tmpfs.items.append(entry) %}{%- endif %}
-  {%- endfor %}
+{% for svc in prepared_services %}
   {{ svc.name }}:
     image: {{ svc.image }}
     container_name: {{ svc.container_name | default(svc.name) }}
@@ -88,81 +80,48 @@ services:
 {% if svc.domainname is defined %}
     domainname: {{ svc.domainname }}
 {% endif %}
-{% if svc_user is not none %}
-    user: {{ svc_user }}
+{% if svc.render_user is not none %}
+    user: {{ svc.render_user }}
 {% endif %}
-{% if svc_read_only is not none %}
-    read_only: {{ svc_read_only | ternary('true', 'false') }}
+{% if svc.render_init is not none %}
+    init: {{ svc.render_init | to_json }}
 {% endif %}
-{% if svc_cap_drop %}
+{% if svc.render_read_only is not none %}
+    read_only: {{ svc.render_read_only | to_json }}
+{% endif %}
+{% if svc.render_cap_drop %}
     cap_drop:
-{% for cap in svc_cap_drop %}
+{% for cap in svc.render_cap_drop %}
       - {{ cap }}
 {% endfor %}
 {% endif %}
-{% if svc_security_opt.items %}
+{% if svc.render_security_opt %}
     security_opt:
-{% for opt in svc_security_opt.items %}
+{% for opt in svc.render_security_opt %}
       - {{ opt }}
 {% endfor %}
 {% endif %}
-{% if svc_tmpfs.items %}
+{% if svc.render_tmpfs %}
     tmpfs:
-{% for entry in svc_tmpfs.items %}
+{% for entry in svc.render_tmpfs %}
       - "{{ entry }}"
 {% endfor %}
 {% endif %}
 {% if svc.working_dir is defined %}
     working_dir: {{ svc.working_dir }}
 {% endif %}
-  {% set svc_secret_env = svc.secret_env | default(secret_env) %}
-  {% set env_ns = namespace(files=[]) %}
-  {% if svc.env_file is defined %}
-  {% if svc.env_file is string %}
-    {% set _ = env_ns.files.append(svc.env_file) %}
-  {% elif svc.env_file is iterable %}
-    {% for ef in svc.env_file %}
-      {% set _ = env_ns.files.append(ef) %}
-    {% endfor %}
-  {% endif %}
-  {% endif %}
-{% if env_ns.files %}
+{% if svc.render_env_files %}
     env_file:
-{% for ef in env_ns.files %}
+{% for ef in svc.render_env_files %}
       - "{{ ef }}"
 {% endfor %}
 {% endif %}
-{% set inline_env = svc.env | default([]) %}
-
-{% set environment_ns = namespace(items=[], names=[]) %}
-
-{% if connections_per_second and svc.name == primary_service_name %}
-  {% set inline_env = inline_env + [{'name': 'CONNECTIONS_PER_SECOND', 'value': connections_per_second | string}] %}
-{% endif %}
-  {% for item in inline_env %}
-    {% if item.name not in environment_ns.names %}
-      {% set _ = environment_ns.items.append({'name': item.name, 'value': item.value}) %}
-      {% set _ = environment_ns.names.append(item.name) %}
-    {% endif %}
-  {% endfor %}
-  {% if secrets is defined and secrets.rotation_timestamp is defined and secrets.rotation_timestamp is not none %}
-    {% if 'SHMA_SECRETS_ROTATION' not in environment_ns.names %}
-      {% set _ = environment_ns.items.append({'name': 'SHMA_SECRETS_ROTATION', 'value': secrets.rotation_timestamp}) %}
-      {% set _ = environment_ns.names.append('SHMA_SECRETS_ROTATION') %}
-    {% endif %}
-  {% endif %}
-  {% for secret_item in svc_secret_env %}
-    {% if secret_item.name not in environment_ns.names %}
-      {% set _ = environment_ns.items.append({'name': secret_item.name, 'value': '${' ~ secret_item.name ~ '}'}) %}
-      {% set _ = environment_ns.names.append(secret_item.name) %}
-    {% endif %}
-  {% endfor %}
-  {% if environment_ns.items %}
+{% if svc.render_environment %}
     environment:
-  {% for env_item in environment_ns.items %}
+{% for env_item in svc.render_environment %}
       {{ env_item.name }}: {{ env_item.value }}
-  {% endfor %}
-  {% endif %}
+{% endfor %}
+{% endif %}
   {% if svc.entrypoint is defined %}
     entrypoint: {{ svc.entrypoint if svc.entrypoint is string else svc.entrypoint | to_json }}
 {% endif %}
@@ -228,7 +187,7 @@ services:
 {% set svc_health = svc.health if svc.health is defined else (health if loop.first and health is defined else None) %}
 {% if svc_health is not none %}
     healthcheck:
-      test: {{ svc_health.cmd | default(['true']) | to_json }}
+      test: {{ svc_health | health_command | to_json }}
       interval: {{ svc_health.interval | default('10s') }}
       timeout: {{ svc_health.timeout | default('5s') }}
       retries: {{ svc_health.retries | default(3) }}
@@ -236,10 +195,9 @@ services:
       start_period: {{ svc_health.start_period }}
 {% endif %}
 {% endif %}
-{% set svc_file_secrets = svc.file_secrets | default(file_secrets) %}
-{% if svc_file_secrets %}
+{% if svc.render_file_secrets %}
     secrets:
-{% for secret in svc_file_secrets %}
+{% for secret in svc.render_file_secrets %}
       - source: {{ secret.name }}
         target: {{ secret.target | default(secret.name) }}
         mode: {{ secret.mode | default('0400') }}
@@ -248,7 +206,7 @@ services:
 {% endfor %}
 
 {% set ns = namespace(volumes=[]) %}
-{% for svc in services_list %}
+{% for svc in prepared_services %}
   {% for vol in svc.volumes | default([]) %}
     {% if vol.host_path is not defined %}
       {% set volume_name = vol.source | default(vol.name) %}
@@ -261,9 +219,9 @@ services:
 {% endfor %}
 {% if ns.volumes %}
 volumes:
-{% for volume_name in ns.volumes %}
-  {{ volume_name }}:
-    driver: {{ volume_driver | default('local') }}
+{% for volume in ns.volumes %}
+  {{ volume.name }}:
+    driver: {{ volume.driver | default('local') }}
 {% endfor %}
 {% endif %}
 
@@ -276,7 +234,7 @@ secrets:
 {% endif %}
 
 {% set network_ns = namespace(items=[]) %}
-{% for svc in services_list %}
+{% for svc in prepared_services %}
   {% for net in svc.networks | default(['app-network']) %}
     {% if net not in network_ns.items %}
       {% set _ = network_ns.items.append(net) %}

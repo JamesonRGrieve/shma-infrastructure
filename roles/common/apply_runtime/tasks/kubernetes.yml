@@ -1,6 +1,39 @@
 ---
+- name: Ensure target namespace exists
+  vars:
+    target_namespace: "{{ k8s_namespace | default('default') }}"
+  block:
+    - name: Retrieve namespace information
+      kubernetes.core.k8s_info:
+        kind: Namespace
+        name: "{{ target_namespace }}"
+      register: namespace_info
+
+    - name: Validate namespace availability
+      ansible.builtin.assert:
+        that:
+          - namespace_info.resources | length > 0
+        fail_msg: "Namespace '{{ target_namespace }}' does not exist"
+
 - name: Apply Kubernetes manifests
-  kubernetes.core.k8s:
-    state: present
-    src: "{{ runtime_config_path }}"
-    namespace: "{{ k8s_namespace | default('default') }}"
+  vars:
+    target_namespace: "{{ k8s_namespace | default('default') }}"
+  block:
+    - name: Apply manifests in target namespace
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ runtime_config_path }}"
+        namespace: "{{ target_namespace }}"
+
+  rescue:
+    - name: Roll back applied manifests after failure
+      kubernetes.core.k8s:
+        state: absent
+        src: "{{ runtime_config_path }}"
+        namespace: "{{ target_namespace }}"
+
+    - name: Fail due to manifest application error
+      ansible.builtin.fail:
+        msg: >-
+          Failed to apply manifests in namespace '{{ target_namespace }}':
+          {{ ansible_failed_result.msg | default('unknown error') }}

@@ -2,6 +2,8 @@
 
 A runtime-agnostic infrastructure-as-code framework for deploying self-hosted applications across **Proxmox LXC**, **Docker Compose**, **Podman Quadlets**, **Kubernetes**, and **bare-metal systemd** from a single service contract.
 
+> **Heads-up:** Earlier drafts referenced an "Advanced Research mode". That experiment has been retired—everything documented here reflects the only supported workflow.
+
 ## Key Features
 
 - **Write Once, Deploy Anywhere** – render the same service definition into runtime-specific manifests and unit files.
@@ -53,7 +55,9 @@ The rendered manifest is written to `/tmp/ansible-runtime/<service_id>/<runtime>
 
 ## Service Contract Essentials
 
-Every service definition must provide identifiers, runtime templates, health checks, mounts, and exports. A minimal example using the bundled `sample_service.yml` looks like:
+Every service definition must provide identifiers, runtime templates, health checks, mounts, and exports. Host mounts **must** be declared with the `service_volumes` key (plural) to match the live schema.
+
+A minimal example using the bundled `sample_service.yml` looks like:
 
 ```yaml
 service_id: sample-service
@@ -97,7 +101,7 @@ secrets:
       value: "{{ sample_service_tls_cert }}"
 ```
 
-> **Note:** Always declare host mounts with `service_volumes` (plural). The legacy `service_volume` key has been removed; migrate older inventories to the plural form before running validation.
+> **Note:** Always declare host mounts with `service_volumes` (plural). The legacy `service_volume` key has been removed from the framework; migrate older inventories to the plural form before running validation to avoid schema failures.
 
 Downstream applications consume these exports by resolving them through a dependency registry shared between repositories. Provide the registry as a list of known dependencies either inline (`dependency_registry`) or via `dependency_registry_file`:
 
