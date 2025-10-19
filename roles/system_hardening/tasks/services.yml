@@ -1,0 +1,8 @@
+---
+- name: Disable unnecessary services
+  ansible.builtin.service:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+  loop: "{{ (hardening_disable_services + hardening_additional_disable_services) | unique }}"
+  ignore_errors: true

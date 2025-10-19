@@ -1,0 +1,42 @@
+---
+- name: Resolve cockpit package set for distribution
+  ansible.builtin.set_fact:
+    hardening_cockpit_package_target: "{{ hardening_cockpit_packages | platform_map(ansible_distribution, ansible_os_family, default=[]) }}"
+  when: hardening_enable_cockpit
+
+- name: Ensure cockpit packages are installed when enabled
+  ansible.builtin.package:
+    name: "{{ hardening_cockpit_package_target }}"
+    state: present
+  when:
+    - hardening_enable_cockpit
+    - hardening_cockpit_package_target is defined
+    - hardening_cockpit_package_target | length > 0
+
+- name: Ensure cockpit socket override directory exists when enabled
+  ansible.builtin.file:
+    path: /etc/systemd/system/cockpit.socket.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: hardening_enable_cockpit
+
+- name: Configure cockpit socket binding
+  ansible.builtin.template:
+    src: cockpit-listen.conf.j2
+    dest: /etc/systemd/system/cockpit.socket.d/listen.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload systemd daemon
+    - Restart cockpit socket
+  when: hardening_enable_cockpit
+
+- name: Remove cockpit socket override when disabled
+  ansible.builtin.file:
+    path: /etc/systemd/system/cockpit.socket.d/listen.conf
+    state: absent
+  notify: Reload systemd daemon
+  when: not hardening_enable_cockpit

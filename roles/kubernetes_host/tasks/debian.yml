@@ -9,6 +9,10 @@
     state: present
     update_cache: true
 
+- name: Resolve Kubernetes repository base URL
+  ansible.builtin.set_fact:
+    kubernetes_repo_base_url: "{{ kubernetes_repo_base | platform_map(ansible_distribution, ansible_os_family, default='') }}"
+
 - name: Ensure apt key directory exists
   ansible.builtin.file:
     path: /etc/apt/keyrings
@@ -17,7 +21,7 @@
 
 - name: Download Kubernetes Release key
   ansible.builtin.get_url:
-    url: "{{ kubernetes_repo_base.get(ansible_distribution, kubernetes_repo_base.get(ansible_os_family, '')) }}Release.key"
+    url: "{{ kubernetes_repo_base_url }}Release.key"
     dest: /etc/apt/keyrings/kubernetes-release.key
     mode: '0644'
 
@@ -30,7 +34,7 @@
   ansible.builtin.copy:
     dest: /etc/apt/sources.list.d/kubernetes.list
     content: |
-      deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] {{ kubernetes_repo_base.get(ansible_distribution, kubernetes_repo_base.get(ansible_os_family, '')) }} /
+      deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] {{ kubernetes_repo_base_url }} /
     owner: root
     group: root
     mode: '0644'
@@ -46,11 +50,11 @@
 
 - name: Install Kubernetes components
   ansible.builtin.apt:
-    name: "{{ kubernetes_packages.get(ansible_distribution, kubernetes_packages.get(ansible_os_family, [])) }}"
+    name: "{{ kubernetes_packages | platform_map(ansible_distribution, ansible_os_family, default=[]) }}"
     state: present
 
 - name: Hold Kubernetes packages at current version
   ansible.builtin.dpkg_selections:
     name: "{{ item }}"
     selection: hold
-  loop: "{{ kubernetes_packages.get(ansible_distribution, kubernetes_packages.get(ansible_os_family, [])) }}"
+  loop: "{{ kubernetes_packages | platform_map(ansible_distribution, ansible_os_family, default=[]) }}"

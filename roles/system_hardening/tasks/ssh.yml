@@ -1,0 +1,21 @@
+---
+- name: Configure SSH daemon hardening drop-in
+  ansible.builtin.template:
+    src: ssh_hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/hardening.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart SSH service
+
+- name: Ensure privileged separation directory exists
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - /run/sshd
+    - /var/run/sshd
+    - /var/empty/sshd

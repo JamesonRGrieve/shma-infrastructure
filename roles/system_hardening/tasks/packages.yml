@@ -1,0 +1,10 @@
+---
+- name: Resolve package set for distribution
+  ansible.builtin.set_fact:
+    hardening_package_target: "{{ hardening_packages_common | platform_map(ansible_distribution, ansible_os_family, default=[]) }}"
+
+- name: Ensure base hardening packages are installed
+  ansible.builtin.package:
+    name: "{{ hardening_package_target }}"
+    state: present
+  when: hardening_package_target | length > 0

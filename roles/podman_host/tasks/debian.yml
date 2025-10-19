@@ -11,5 +11,5 @@
 
 - name: Install Podman dependencies on Debian family
   ansible.builtin.apt:
-    name: "{{ podman_host_packages.get(ansible_distribution, podman_host_packages.get(ansible_os_family, [])) }}"
+    name: "{{ podman_host_packages | platform_map(ansible_distribution, ansible_os_family, default=[]) }}"
     state: present
