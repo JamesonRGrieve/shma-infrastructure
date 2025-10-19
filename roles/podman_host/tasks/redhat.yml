@@ -7,7 +7,7 @@
 
 - name: Install Podman dependencies on Red Hat family
   ansible.builtin.dnf:
-    name: "{{ podman_host_packages.get(ansible_distribution, podman_host_packages.get('AlmaLinux', [])) }}"
+    name: "{{ podman_host_packages | platform_map(ansible_distribution, ansible_os_family, 'AlmaLinux', []) }}"
     state: present
     disable_gpg_check: false
 

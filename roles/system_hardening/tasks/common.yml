@@ -1,220 +1,27 @@
 ---
-- name: Resolve package set for distribution
-  ansible.builtin.set_fact:
-    hardening_package_target: "{{ hardening_packages_common.get(ansible_distribution, hardening_packages_common.get(ansible_os_family, [])) }}"
+- name: Include package hardening tasks
+  ansible.builtin.import_tasks: packages.yml
 
-- name: Ensure base hardening packages are installed
-  ansible.builtin.package:
-    name: "{{ hardening_package_target }}"
-    state: present
-  when: hardening_package_target | length > 0
+- name: Include cockpit hardening tasks
+  ansible.builtin.import_tasks: cockpit.yml
 
-- name: Resolve cockpit package set for distribution
-  ansible.builtin.set_fact:
-    hardening_cockpit_package_target: "{{ hardening_cockpit_packages.get(ansible_distribution, hardening_cockpit_packages.get(ansible_os_family, [])) }}"
-  when: hardening_enable_cockpit
+- name: Include account hardening tasks
+  ansible.builtin.import_tasks: accounts.yml
 
-- name: Ensure cockpit packages are installed when enabled
-  ansible.builtin.package:
-    name: "{{ hardening_cockpit_package_target }}"
-    state: present
-  when:
-    - hardening_enable_cockpit
-    - hardening_cockpit_package_target is defined
-    - hardening_cockpit_package_target | length > 0
+- name: Include sysctl hardening tasks
+  ansible.builtin.import_tasks: sysctl.yml
 
-- name: Check for existing AIDE database
-  ansible.builtin.stat:
-    path: "{{ hardening_aide_db_path }}"
-  register: hardening_aide_db
+- name: Include SSH hardening tasks
+  ansible.builtin.import_tasks: ssh.yml
 
-- name: Lock root password login
-  ansible.builtin.user:
-    name: root
-    password_lock: true
+- name: Include sudo hardening tasks
+  ansible.builtin.import_tasks: sudo.yml
 
-- name: Apply kernel and network sysctl hardening
-  ansible.builtin.sysctl:
-    name: "{{ item.name }}"
-    value: "{{ item.value }}"
-    sysctl_set: true
-    reload: true
-  loop: "{{ hardening_sysctl_common }}"
+- name: Include integrity monitoring tasks
+  ansible.builtin.import_tasks: integrity.yml
 
-- name: Disable IPv6 when requested
-  ansible.builtin.sysctl:
-    name: "{{ item }}"
-    value: '1'
-    sysctl_set: true
-    reload: true
-  loop: "{{ hardening_ipv6_disable_targets }}"
-  when: not hardening_enable_ipv6
+- name: Include security tooling maintenance tasks
+  ansible.builtin.import_tasks: security_tools.yml
 
-- name: Configure SSH daemon hardening drop-in
-  ansible.builtin.template:
-    src: ssh_hardening.conf.j2
-    dest: /etc/ssh/sshd_config.d/hardening.conf
-    owner: root
-    group: root
-    mode: '0644'
-  notify: Restart SSH service
-
-- name: Ensure privileged separation directory exists
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: directory
-    owner: root
-    group: root
-    mode: '0755'
-  loop:
-    - /run/sshd
-    - /var/run/sshd
-    - /var/empty/sshd
-
-- name: Configure sudoers timeout policy
-  ansible.builtin.copy:
-    dest: /etc/sudoers.d/timeout
-    content: |-
-      Defaults timestamp_timeout=5
-    owner: root
-    group: root
-    mode: '0440'
-  notify: Validate sudoers configuration
-
-- name: Configure sudo cockpit exception when enabled
-  ansible.builtin.copy:
-    dest: /etc/sudoers.d/cockpit
-    content: |-
-      Defaults:cockpit !authenticate
-    owner: root
-    group: root
-    mode: '0440'
-  notify: Validate sudoers configuration
-  when:
-    - hardening_enable_cockpit
-    - hardening_cockpit_passwordless_sudo
-
-- name: Remove sudo cockpit exception when disabled
-  ansible.builtin.file:
-    path: /etc/sudoers.d/cockpit
-    state: absent
-  notify: Validate sudoers configuration
-  when: not (hardening_enable_cockpit and hardening_cockpit_passwordless_sudo)
-
-- name: Ensure cockpit socket override directory exists when enabled
-  ansible.builtin.file:
-    path: /etc/systemd/system/cockpit.socket.d
-    state: directory
-    owner: root
-    group: root
-    mode: '0755'
-  when: hardening_enable_cockpit
-
-- name: Configure cockpit socket binding
-  ansible.builtin.template:
-    src: cockpit-listen.conf.j2
-    dest: /etc/systemd/system/cockpit.socket.d/listen.conf
-    owner: root
-    group: root
-    mode: '0644'
-  notify:
-    - Reload systemd daemon
-    - Restart cockpit socket
-  when: hardening_enable_cockpit
-
-- name: Remove cockpit socket override when disabled
-  ansible.builtin.file:
-    path: /etc/systemd/system/cockpit.socket.d/listen.conf
-    state: absent
-  notify: Reload systemd daemon
-  when: not hardening_enable_cockpit
-
-- name: Require TTY for sudo invocations
-  ansible.builtin.template:
-    src: sudo_requiretty.j2
-    dest: /etc/sudoers.d/requiretty
-    owner: root
-    group: root
-    mode: '0440'
-  notify: Validate sudoers configuration
-
-- name: Deploy SSH authorized keys when provided
-  ansible.builtin.authorized_key:
-    user: "{{ item.name }}"
-    key: "{{ item.key }}"
-    manage_dir: true
-  loop: "{{ hardening_authorized_users }}"
-  when: hardening_authorized_users | length > 0
-
-- name: Enforce secure umask defaults
-  ansible.builtin.lineinfile:
-    path: "{{ item }}"
-    line: 'umask 027'
-    insertafter: EOF
-    state: present
-  loop: "{{ hardening_umask_targets }}"
-  ignore_errors: true
-
-- name: Ensure weekly AIDE integrity check cron job exists
-  ansible.builtin.cron:
-    name: Weekly AIDE check
-    minute: "{{ hardening_weekly_aide_check_minute }}"
-    hour: "{{ hardening_weekly_aide_check_hour }}"
-    weekday: "{{ hardening_weekly_aide_check_day }}"
-    user: root
-    job: /usr/bin/aide --check
-    state: present
-
-- name: Configure log rotation for security tooling
-  ansible.builtin.template:
-    src: security_tools_logrotate.j2
-    dest: /etc/logrotate.d/hardening-security-tools
-    owner: root
-    group: root
-    mode: '0644'
-  when: >-
-    ansible_facts.packages.get('clamav') is defined or
-    ansible_facts.packages.get('clamav-daemon') is defined or
-    ansible_facts.packages.get('clamav-update') is defined or
-    ansible_facts.packages.get('clamd') is defined or
-    ansible_facts.packages.get('rkhunter') is defined or
-    ansible_facts.packages.get('chkrootkit') is defined
-
-- name: Ensure chkrootkit log directory exists
-  ansible.builtin.file:
-    path: /var/log/chkrootkit
-    state: directory
-    owner: root
-    group: root
-    mode: '0750'
-  when: ansible_facts.packages.get('chkrootkit') is defined
-
-- name: Schedule rkhunter scans during the maintenance window
-  ansible.builtin.cron:
-    name: RKHunter maintenance scan
-    minute: "{{ hardening_security_tool_scan_minute }}"
-    hour: "{{ hardening_security_tool_scan_hour }}"
-    weekday: "{{ hardening_security_tool_scan_weekday }}"
-    user: root
-    job: /usr/bin/rkhunter --cronjob --quiet --report-warnings-only
-    state: present
-  when: ansible_facts.packages.get('rkhunter') is defined
-
-- name: Schedule chkrootkit scans during the maintenance window
-  ansible.builtin.cron:
-    name: chkrootkit maintenance scan
-    minute: "{{ hardening_security_tool_scan_minute }}"
-    hour: "{{ hardening_security_tool_scan_hour }}"
-    weekday: "{{ hardening_security_tool_scan_weekday }}"
-    user: root
-    job: nice -n 10 /usr/sbin/chkrootkit >> /var/log/chkrootkit/chkrootkit.log 2>&1
-    state: present
-  when: ansible_facts.packages.get('chkrootkit') is defined
-
-- name: Disable unnecessary services
-  ansible.builtin.service:
-    name: "{{ item }}"
-    enabled: false
-    state: stopped
-  loop: "{{ (hardening_disable_services + hardening_additional_disable_services) | unique }}"
-  ignore_errors: true
+- name: Include service hardening tasks
+  ansible.builtin.import_tasks: services.yml

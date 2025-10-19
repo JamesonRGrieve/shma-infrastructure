@@ -1,7 +1,7 @@
 ---
 - name: Ensure apt prerequisites are present
   ansible.builtin.apt:
-    name: "{{ docker_host_prereq_packages.get(ansible_distribution, docker_host_prereq_packages.get(ansible_os_family, [])) }}"
+    name: "{{ docker_host_prereq_packages | platform_map(ansible_distribution, ansible_os_family, default=[]) }}"
     state: present
     update_cache: true
 
@@ -36,5 +36,5 @@
 
 - name: Install Docker engine components
   ansible.builtin.apt:
-    name: "{{ docker_host_package_map.get(ansible_distribution, docker_host_package_map.get(ansible_os_family, [])) }}"
+    name: "{{ docker_host_package_map | platform_map(ansible_distribution, ansible_os_family, default=[]) }}"
     state: present

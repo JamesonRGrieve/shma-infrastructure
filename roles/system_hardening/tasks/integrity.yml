@@ -1,0 +1,15 @@
+---
+- name: Check for existing AIDE database
+  ansible.builtin.stat:
+    path: "{{ hardening_aide_db_path }}"
+  register: hardening_aide_db
+
+- name: Ensure weekly AIDE integrity check cron job exists
+  ansible.builtin.cron:
+    name: Weekly AIDE check
+    minute: "{{ hardening_weekly_aide_check_minute }}"
+    hour: "{{ hardening_weekly_aide_check_hour }}"
+    weekday: "{{ hardening_weekly_aide_check_day }}"
+    user: root
+    job: /usr/bin/aide --check
+    state: present

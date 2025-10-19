@@ -1,0 +1,22 @@
+---
+- name: Lock root password login
+  ansible.builtin.user:
+    name: root
+    password_lock: true
+
+- name: Deploy SSH authorized keys when provided
+  ansible.builtin.authorized_key:
+    user: "{{ item.name }}"
+    key: "{{ item.key }}"
+    manage_dir: true
+  loop: "{{ hardening_authorized_users }}"
+  when: hardening_authorized_users | length > 0
+
+- name: Enforce secure umask defaults
+  ansible.builtin.lineinfile:
+    path: "{{ item }}"
+    line: 'umask 027'
+    insertafter: EOF
+    state: present
+  loop: "{{ hardening_umask_targets }}"
+  ignore_errors: true

@@ -1,7 +1,7 @@
 ---
 - name: Ensure Docker prerequisites present on Red Hat hosts
   ansible.builtin.dnf:
-    name: "{{ docker_host_prereq_packages.get(ansible_distribution, docker_host_prereq_packages.get('AlmaLinux', [])) }}"
+    name: "{{ docker_host_prereq_packages | platform_map(ansible_distribution, ansible_os_family, 'AlmaLinux', []) }}"
     state: present
     update_cache: true
 
@@ -13,7 +13,7 @@
 
 - name: Install Docker engine packages
   ansible.builtin.dnf:
-    name: "{{ docker_host_package_map.get(ansible_distribution, docker_host_package_map.get('AlmaLinux', [])) }}"
+    name: "{{ docker_host_package_map | platform_map(ansible_distribution, ansible_os_family, 'AlmaLinux', []) }}"
     state: present
     enablerepo: docker-ce-stable
 

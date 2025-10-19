@@ -6,13 +6,13 @@
 
     - name: Health check after deployment
       vars:
-        apply_runtime_health_command: {{ health | health_command }}
+        apply_runtime_health_command: "{{ health | health_command }}"
       command: "{{ apply_runtime_health_command[0] }}"
       args:
-        argv: {{ apply_runtime_health_command }}
+        argv: "{{ apply_runtime_health_command }}"
       delegate_to: "{{ service_ip | default(ansible_default_ipv4.address) }}"
-      retries: {{ health.retries | default(3) }}
-      delay: {{ health.interval | default('10s') | regex_replace('s$', '') | int }}
+      retries: "{{ health.retries | default(3) }}"
+      delay: "{{ health.interval | default('10s') | regex_replace('s$', '') | int }}"
       register: health_result
       until: health_result.rc == 0
       when: health is defined

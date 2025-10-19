@@ -1,0 +1,39 @@
+---
+- name: Configure sudoers timeout policy
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/timeout
+    content: |-
+      Defaults timestamp_timeout=5
+    owner: root
+    group: root
+    mode: '0440'
+  notify: Validate sudoers configuration
+
+- name: Configure sudo cockpit exception when enabled
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/cockpit
+    content: |-
+      Defaults:cockpit !authenticate
+    owner: root
+    group: root
+    mode: '0440'
+  notify: Validate sudoers configuration
+  when:
+    - hardening_enable_cockpit
+    - hardening_cockpit_passwordless_sudo
+
+- name: Remove sudo cockpit exception when disabled
+  ansible.builtin.file:
+    path: /etc/sudoers.d/cockpit
+    state: absent
+  notify: Validate sudoers configuration
+  when: not (hardening_enable_cockpit and hardening_cockpit_passwordless_sudo)
+
+- name: Require TTY for sudo invocations
+  ansible.builtin.template:
+    src: sudo_requiretty.j2
+    dest: /etc/sudoers.d/requiretty
+    owner: root
+    group: root
+    mode: '0440'
+  notify: Validate sudoers configuration

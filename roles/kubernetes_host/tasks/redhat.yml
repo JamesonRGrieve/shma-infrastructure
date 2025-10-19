@@ -9,9 +9,13 @@
     state: present
     update_cache: true
 
+- name: Resolve Kubernetes repository base URL
+  ansible.builtin.set_fact:
+    kubernetes_repo_base_url: "{{ kubernetes_repo_base | platform_map(ansible_distribution, ansible_os_family, 'AlmaLinux', '') }}"
+
 - name: Enable Kubernetes repository gpg key
   ansible.builtin.get_url:
-    url: "{{ kubernetes_repo_base.get(ansible_distribution, kubernetes_repo_base.get('AlmaLinux')) }}repodata/repomd.xml.key"
+    url: "{{ kubernetes_repo_base_url }}repodata/repomd.xml.key"
     dest: /etc/pki/rpm-gpg/RPM-GPG-KEY-kubernetes
     mode: '0644'
 
@@ -26,10 +30,10 @@
     content: |
       [kubernetes]
       name=Kubernetes
-      baseurl={{ kubernetes_repo_base.get(ansible_distribution, kubernetes_repo_base.get('AlmaLinux')) }}
+      baseurl={{ kubernetes_repo_base_url }}
       enabled=1
       gpgcheck=1
-      gpgkey={{ kubernetes_repo_base.get(ansible_distribution, kubernetes_repo_base.get('AlmaLinux')) }}repodata/repomd.xml.key
+      gpgkey={{ kubernetes_repo_base_url }}repodata/repomd.xml.key
     owner: root
     group: root
     mode: '0644'
@@ -41,5 +45,5 @@
 
 - name: Install Kubernetes components
   ansible.builtin.dnf:
-    name: "{{ kubernetes_packages.get(ansible_distribution, kubernetes_packages.get('AlmaLinux', [])) }}"
+    name: "{{ kubernetes_packages | platform_map(ansible_distribution, ansible_os_family, 'AlmaLinux', []) }}"
     state: present

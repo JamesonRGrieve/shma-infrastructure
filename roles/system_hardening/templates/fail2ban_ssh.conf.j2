@@ -2,7 +2,7 @@
 enabled = true
 port = {{ hardening_ssh_port }}
 filter = sshd
-logpath = {{ hardening_fail2ban_log_path_map.get(ansible_distribution, hardening_fail2ban_log_path_map.get(ansible_os_family, '/var/log/auth.log')) }}
+logpath = {{ hardening_fail2ban_log_path_map | platform_map(ansible_distribution, ansible_os_family, default='/var/log/auth.log') }}
 backend = {{ 'systemd' if ansible_os_family == 'RedHat' else 'auto' }}
 maxretry = {{ hardening_fail2ban_maxretry }}
 bantime = {{ hardening_fail2ban_bantime }}

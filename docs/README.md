@@ -51,6 +51,10 @@ The rendered manifest is written to `/tmp/ansible-runtime/<service_id>/<runtime>
 - [Backup strategy](backup.md)
 - [Troubleshooting](troubleshooting.md)
 
+## Developer Guides
+
+- [Filter plugin reference](filter_plugins.md)
+
 ## Service Contract Essentials
 
 Every service definition must provide identifiers, runtime templates, health checks, mounts, and exports. Host mounts **must** be declared with the `service_volumes` key (plural) to match the live schema.

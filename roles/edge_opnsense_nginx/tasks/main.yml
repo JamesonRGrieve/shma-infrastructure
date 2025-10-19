@@ -13,65 +13,11 @@
       - "'global' not in (opnsense_nginx_api_key | lower)"
     fail_msg: "opnsense_nginx_api_key must target the Nginx subsystem instead of root/global access"
 
-- name: Initialize OPNsense Nginx payload containers
+- name: Build OPNsense Nginx payloads
   ansible.builtin.set_fact:
-    opnsense_nginx_upstreams: []
-    opnsense_nginx_servers: []
-
-- name: Build OPNsense Nginx upstream payloads
-  ansible.builtin.set_fact:
-    opnsense_nginx_upstreams: "{{ opnsense_nginx_upstreams + [ upstream_payload ] }}"
-  loop: "{{ edge_ingress_backends | default([]) }}"
-  loop_control:
-    loop_var: edge_backend
+    opnsense_nginx_payload: "{{ edge_ingress_backends | default([]) | opnsense_nginx_payloads(bind_definitions, opnsense_nginx_tls_certificate_id) }}"
   vars:
-    upstream_payload: >-
-      {{ {
-        'name': edge_backend.service_id,
-        'description': edge_backend.router_name,
-        'server': edge_backend.exports.APP_BACKEND_IP,
-        'port': edge_backend.exports.APP_PORT,
-        'protocol': edge_backend.scheme,
-        'health_check_path': edge_backend.path_prefix if edge_backend.path_prefix != '/' else '/',
-        'websocket': 'websocket' in (edge_backend.middlewares | default([]))
-      } | to_json | from_json }}
-
-- name: Build OPNsense Nginx server payloads
-  ansible.builtin.set_fact:
-    opnsense_nginx_servers: "{{ opnsense_nginx_servers + [ server_payload ] }}"
-  loop: "{{ edge_ingress_backends | default([]) }}"
-  loop_control:
-    loop_var: edge_backend
-  vars:
-    listener_http: "{{ opnsense_nginx_listen_addresses | selectattr('tls', 'defined') | selectattr('tls', 'equalto', false) | list }}"
-    listener_https: "{{ opnsense_nginx_listen_addresses | selectattr('tls', 'defined') | selectattr('tls', 'equalto', true) | list }}"
-    server_payload: >-
-      {{ {
-        'server_name': edge_backend.exports.APP_FQDN,
-        'locations': [
-          {
-            'path': edge_backend.path_prefix if edge_backend.path_prefix != '/' else '/',
-            'upstream': edge_backend.service_id,
-            'preserve_host': edge_backend.preserve_host | default(False),
-            'websocket': 'websocket' in (edge_backend.middlewares | default([]))
-          }
-        ],
-        'listen_http': listener_http | length > 0,
-        'listen_https': listener_https | length > 0,
-        'certificate_id': opnsense_nginx_tls_certificate_id if edge_backend.tls else None,
-        'http_bind': [
-          {
-            'address': bind.address | string,
-            'port': bind.port | string
-          } for bind in listener_http
-        ],
-        'https_bind': [
-          {
-            'address': bind.address | string,
-            'port': bind.port | string
-          } for bind in listener_https
-        ]
-      } | to_json | from_json }}
+    bind_definitions: "{{ opnsense_nginx_listen_addresses | default([{'address': '0.0.0.0', 'port': 80, 'tls': false}, {'address': '0.0.0.0', 'port': 443, 'tls': true}]) }}"
 
 - name: Push Nginx configuration to OPNsense
   ansible.builtin.uri:
@@ -84,8 +30,8 @@
     body_format: json
     status_code: 200
     body:
-      upstreams: {{ opnsense_nginx_upstreams }}
-      servers: {{ opnsense_nginx_servers }}
+      upstreams: {{ opnsense_nginx_payload.upstreams }}
+      servers: {{ opnsense_nginx_payload.servers }}
   register: opnsense_nginx_import
   no_log: true
 
