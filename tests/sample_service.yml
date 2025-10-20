@@ -3,11 +3,11 @@ service_name: sample-service
 service_unit_name: sample-service
 service_image: docker.io/library/nginx@sha256:2ed85f18cb2c6b49e191bcb6bf12c0c07d63f3937a05d9f5234170d4f8df5c94
 version: "1.27.0"
-service_ip: &service_ip 10.23.45.50
+service_ip: 10.23.45.50
 service_ports:
   - target: 8080
     published: 8080
-    host_ip: *service_ip
+    host_ip: 10.23.45.50
 service_env:
   - name: APP_MODE
     value: production
@@ -32,25 +32,25 @@ service_services:
     state: started
 service_commands:
   - /usr/bin/true
-service_resources: &service_resources
-  memory_mb: &service_memory 512
-  cpu_cores: &service_cores 1
+service_resources:
+  memory_mb: 512
+  cpu_cores: 1
   connections_per_second: 200
 service_namespace: sample
 service_replicas: 1
-service_storage_gb: &service_storage 5
-service_gateway: &service_gateway 10.23.45.1
+service_storage_gb: 5
+service_gateway: 10.23.45.1
 service_container:
   vmid: 200
   hostname: sample-service
   ostemplate: local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst
-  disk: *service_storage
-  cores: *service_cores
-  memory: *service_memory
+  disk: 5
+  cores: 1
+  memory: 512
   swap: 512
   bridge: vmbr0
   cidr: 24
-  gateway: *service_gateway
+  gateway: 10.23.45.1
   interface: eth0
   onboot: yes
   unprivileged: yes
