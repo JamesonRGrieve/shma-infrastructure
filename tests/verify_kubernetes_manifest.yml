@@ -142,8 +142,8 @@
         that:
           - network_policy_resources | length == 1
           - network_policy_resources[0].spec.podSelector.matchLabels.app == service_name | default(service_id)
-          - 'Ingress' in network_policy_resources[0].spec.policyTypes
-          - 'Egress' in network_policy_resources[0].spec.policyTypes
+          - "'Ingress' in network_policy_resources[0].spec.policyTypes"
+          - "'Egress' in network_policy_resources[0].spec.policyTypes"
           - network_policy_resources[0].spec.ingress[0].from[0].namespaceSelector.matchLabels['kubernetes.io/metadata.name'] == service_namespace | default('default')
         fail_msg: "NetworkPolicy must target the workload namespace with ingress restricted to that namespace and default egress allowed."
 

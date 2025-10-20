@@ -27,23 +27,19 @@ runs:
         import json
         import os
         from pathlib import Path
-
         lane = os.environ["INPUT_LANE"].strip()
         matrix_path = Path("ci/version_matrix.yml")
         matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
-
         python_section = matrix["python"]
         if lane not in python_section:
           raise SystemExit(f"Lane '{lane}' is not defined for python in {matrix_path}")
         python_version = str(python_section[lane]["version"])
         kubectl_versions = matrix["kubectl"]
         collections = matrix["collections"]
-
         if lane not in kubectl_versions:
           raise SystemExit(f"Lane '{lane}' is not defined for kubectl in {matrix_path}")
         if lane not in collections:
           raise SystemExit(f"Lane '{lane}' is not defined for collections in {matrix_path}")
-
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
           fh.write(f"python_version={python_version}\n")
           fh.write(f"kubectl_version={kubectl_versions[lane]}\n")
