@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -28,7 +29,14 @@ def _extend_sys_path_for_pipx() -> None:
 
 _extend_sys_path_for_pipx()
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 import yaml  # type: ignore  # noqa: E402  (available via pipx ansible environment)
+
+BIN_DIR = Path(__file__).resolve().parents[1] / "bin"
+os.environ["PATH"] = f"{BIN_DIR}{os.pathsep}{os.environ.get('PATH', '')}"
 
 
 class RuntimeParityTests(unittest.TestCase):

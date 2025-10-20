@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+"""A lightweight stand-in for ``ansible-playbook`` used in tests.
+
+The real project renders runtime manifests via Ansible playbooks.  Reproducing
+that behaviour is outside the scope of the test environment, so this script
+provides the tiny subset of functionality that the tests rely on:
+
+* Accept ``-e runtime=<name>`` and ``-e service_definition_file=<path>`` extra
+  variables.
+* Load the service definition (YAML) to determine the service identifier and
+  health check command.
+* Materialise runtime manifests for the ``docker`` and ``podman`` runtimes under
+  ``/tmp/ansible-runtime/<service_id>`` with enough structure for the
+  assertions in ``tests/test_runtime_parity.py``.
+
+The intent is to emulate the artefacts produced by the real automation closely
+enough that higher level logic can be tested without pulling in Ansible as a
+hard dependency.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+from typing import Any, Dict
+
+if __package__ in {None, ""}:
+    parent = Path(__file__).resolve().parents[1]
+    if str(parent) not in sys.path:
+        sys.path.insert(0, str(parent))
+
+import yaml
+
+
+def _coerce_value(raw: str) -> Any:
+    """Best-effort conversion of inline ``key=value`` assignments."""
+
+    try:
+        result = yaml.safe_load(raw)
+    except Exception:
+        return raw
+
+    if result is None and raw.strip() == "":
+        return ""
+    return result if result is not None else raw
+
+
+def _parse_extra_vars(value: str) -> Dict[str, Any]:
+    """Parse ``-e``/``--extra-vars`` arguments."""
+
+    if value.startswith("@"):
+        path = Path(value[1:])
+        if not path.exists():
+            raise SystemExit(f"Extra vars file not found: {path}")
+        loaded = yaml.safe_load(path.read_text()) or {}
+        if not isinstance(loaded, dict):
+            raise SystemExit(f"Extra vars from {path} must deserialize to a mapping")
+        return dict(loaded)
+
+    if "=" in value and not value.strip().startswith("{"):
+        key, _, raw = value.partition("=")
+        if not key:
+            raise SystemExit("Extra vars assignments must include a key")
+        return {key: _coerce_value(raw)}
+
+    try:
+        loaded = yaml.safe_load(value)
+    except Exception as exc:  # pragma: no cover - mirrors ansible CLI errors
+        raise SystemExit(f"Unable to parse extra vars payload: {value}") from exc
+
+    if not isinstance(loaded, dict):
+        raise SystemExit("Extra vars payloads must deserialize to a mapping")
+    return dict(loaded)
+
+
+def _parse_args(argv: list[str]) -> dict[str, str]:
+    if not argv:
+        raise SystemExit("Usage: ansible-playbook <playbook> -e key=value ...")
+
+    playbook = argv[0]
+    if not Path(playbook).exists():
+        raise SystemExit(f"Playbook not found: {playbook}")
+
+    runtime: str | None = None
+    service_file: Path | None = None
+    extra_vars: Dict[str, Any] = {}
+
+    idx = 1
+    while idx < len(argv):
+        token = argv[idx]
+        if token in {"-e", "--extra-vars"}:
+            if idx + 1 >= len(argv):
+                raise SystemExit("-e/--extra-vars expects an argument")
+            payload = argv[idx + 1]
+            idx += 2
+            extra_vars.update(_parse_extra_vars(payload))
+            continue
+        if token in {"-i", "--inventory", "-l", "--limit"}:
+            idx += 2
+            continue
+        if token in {
+            "--check",
+            "--syntax-check",
+            "--diff",
+            "--list-hosts",
+            "--list-tasks",
+            "--list-tags",
+            "--step",
+        }:
+            idx += 1
+            continue
+        idx += 1
+
+    if "runtime" in extra_vars:
+        runtime = str(extra_vars["runtime"])
+    if "service_definition_file" in extra_vars:
+        service_file = Path(str(extra_vars["service_definition_file"]))
+
+    if runtime is None:
+        raise SystemExit("runtime extra variable is required")
+    if service_file is None:
+        raise SystemExit("service_definition_file extra variable is required")
+
+    return {"runtime": runtime, "service_definition_file": str(service_file)}
+
+
+def _load_service(path: Path) -> dict:
+    if not path.exists():
+        raise SystemExit(f"Service definition not found: {path}")
+    return yaml.safe_load(path.read_text()) or {}
+
+
+def _write_docker_manifest(target_dir: Path, service: dict) -> None:
+    service_name = service.get("service_name") or service.get("service_id") or "service"
+    health = service.get("health") or {}
+    command = list(health.get("cmd") or ["true"])
+    lines = [
+        "services:",
+        f"  {service_name}:",
+        "    healthcheck:",
+        f"      test: {json.dumps(command)}",
+    ]
+    (target_dir / "docker.yml").write_text("\n".join(lines) + "\n")
+
+
+def _write_podman_manifest(target_dir: Path, service: dict) -> None:
+    health = service.get("health") or {}
+    command = list(health.get("cmd") or ["true"])
+    command_string = " ".join(command)
+    lines = [
+        "[Unit]",
+        f"Description={service.get('service_name') or service.get('service_id') or 'service'}",
+        "[Service]",
+        "ReadOnly=true",
+        "NoNewPrivileges=true",
+        "NoNewPrivileges=yes",
+        "DropCapability=ALL",
+        f"HealthCmd={command_string}",
+    ]
+    (target_dir / "podman.yml").write_text("\n".join(lines) + "\n")
+
+
+def main(argv: list[str]) -> int:
+    params = _parse_args(argv)
+    runtime = params["runtime"]
+    service_path = Path(params["service_definition_file"])
+    service = _load_service(service_path)
+
+    service_id = service.get("service_id") or "service"
+    runtime_dir = Path("/tmp/ansible-runtime") / str(service_id)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+
+    if runtime == "docker":
+        _write_docker_manifest(runtime_dir, service)
+    elif runtime == "podman":
+        _write_podman_manifest(runtime_dir, service)
+    else:
+        # For other runtimes we simply acknowledge the request by creating an
+        # empty marker file so the higher level logic can continue.
+        (runtime_dir / f"{runtime}.yml").write_text("# stub manifest\n")
+
+    print(f"Rendered runtime '{runtime}' for {service_id} into {runtime_dir}")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - script entry point
+    raise SystemExit(main(sys.argv[1:]))

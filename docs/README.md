@@ -54,6 +54,7 @@ The rendered manifest is written to `/tmp/ansible-runtime/<service_id>/<runtime>
 ## Developer Guides
 
 - [Filter plugin reference](filter_plugins.md)
+- [CI dry-run requirements](local_ci_requirements.md)
 
 ## Service Contract Essentials
 
