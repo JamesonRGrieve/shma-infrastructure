@@ -4,7 +4,11 @@ import argparse
 import sys
 from pathlib import Path
 
-import yaml
+if __package__ in {None, ""}:  # pragma: no cover - CLI fallback
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    import yaml
+else:  # pragma: no cover - package import
+    import yaml
 
 
 def load_yaml(path: Path) -> dict:
@@ -45,7 +49,6 @@ def gather_secret_values(service: dict) -> set[str]:
     for item in secret_block.get("files", []) or []:
         _register_secret(secrets, item.get("value"))
         _register_secret(secrets, item.get("content"))
-
 
     return secrets
 

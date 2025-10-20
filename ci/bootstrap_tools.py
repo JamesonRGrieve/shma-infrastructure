@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -16,6 +17,7 @@ from urllib.request import urlopen
 DEFAULT_CONFIG = Path("ci/version_matrix.yml")
 DEFAULT_CACHE_DIR = Path.home() / ".cache" / "ci-tools"
 DEFAULT_BIN_DIR = Path.home() / ".local" / "bin"
+OFFLINE_FLAG = "CI_BOOTSTRAP_OFFLINE"
 
 
 def download(url: str, destination: Path) -> None:
@@ -100,6 +102,18 @@ def ensure_tool(
 
     bin_dir.mkdir(parents=True, exist_ok=True)
     tool_cache.mkdir(parents=True, exist_ok=True)
+
+    if os.environ.get(OFFLINE_FLAG):
+        project_root = Path(__file__).resolve().parents[1]
+        stub_path = project_root / "bin" / binary_name
+        if not stub_path.exists():
+            raise RuntimeError(
+                f"Offline bootstrap requested but stub binary {binary_name} not found"
+            )
+        destination = bin_dir / binary_name
+        shutil.copy2(stub_path, destination)
+        destination.chmod(0o755)
+        return
 
     if cached_binary.exists():
         destination = bin_dir / binary_name

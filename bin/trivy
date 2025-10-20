@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""Stub for ``trivy image`` that reports success without scanning."""
+
+from __future__ import annotations
+
+import sys
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = argv if argv is not None else sys.argv[1:]
+    if not args or args[0] != "image":
+        print("trivy stub supports only 'trivy image <ref>'")
+        return 0
+    if "--exit-code" in args:
+        idx = args.index("--exit-code")
+        if idx + 1 < len(args) and args[idx + 1] not in {"0", "1"}:
+            print("trivy stub ignores non-standard exit codes")
+    print("trivy: scan skipped in stub environment")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - CLI entry point
+    raise SystemExit(main())

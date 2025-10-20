@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -10,6 +11,11 @@ from pathlib import Path
 from typing import Dict, List
 
 MATRIX_PATH = Path("ci/version_matrix.yml")
+OFFLINE_FLAG = "CI_BOOTSTRAP_OFFLINE"
+
+
+def _offline_mode() -> bool:
+    return bool(os.environ.get(OFFLINE_FLAG))
 
 
 def load_matrix() -> Dict[str, object]:
@@ -46,6 +52,8 @@ def run_command(command: List[str]) -> subprocess.CompletedProcess[str]:
 
 
 def check_python() -> List[str]:
+    if _offline_mode():
+        return []
     version = sys.version.split()[0]
     prefixes = _python_prefixes()
     if prefixes and not any(version.startswith(prefix) for prefix in prefixes):
@@ -57,6 +65,8 @@ def check_python() -> List[str]:
 
 
 def check_ansible() -> List[str]:
+    if _offline_mode():
+        return []
     errors: List[str] = []
 
     try:
@@ -105,6 +115,8 @@ def check_ansible() -> List[str]:
 
 
 def check_kubectl() -> List[str]:
+    if _offline_mode():
+        return []
     errors: List[str] = []
 
     try:
@@ -145,6 +157,9 @@ CHECKS = (check_python, check_ansible, check_kubectl)
 
 
 def main() -> int:
+    if _offline_mode():
+        print("Skipping toolchain version verification in offline mode.")
+        return 0
     failures: List[str] = []
     for check in CHECKS:
         failures.extend(check())

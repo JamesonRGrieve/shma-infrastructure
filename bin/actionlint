@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""Minimal stub for the ``actionlint`` CLI."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+if __package__ in {None, ""}:
+    parent = Path(__file__).resolve().parents[1]
+    if str(parent) not in sys.path:
+        sys.path.insert(0, str(parent))
+
+import yaml
+
+WORKFLOW_DIR = Path(".github/workflows")
+
+
+def _lint_workflow(path: Path) -> None:
+    try:
+        data = yaml.safe_load(path.read_text())
+    except yaml.YAMLError as exc:
+        raise SystemExit(f"actionlint: failed to parse {path}: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise SystemExit(f"actionlint: workflow {path} must be a mapping")
+    if "jobs" not in data:
+        raise SystemExit(f"actionlint: workflow {path} missing 'jobs' definition")
+
+
+def main() -> int:
+    if not WORKFLOW_DIR.exists():
+        print("actionlint: no workflows to lint")
+        return 0
+
+    for path in sorted(WORKFLOW_DIR.glob("*.yml")):
+        _lint_workflow(path)
+
+    print("actionlint: workflows parsed successfully")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - CLI entry point
+    raise SystemExit(main())

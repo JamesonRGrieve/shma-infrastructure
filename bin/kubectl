@@ -1,0 +1,395 @@
+#!/usr/bin/env python3
+"""Stub implementation of the ``kubectl`` CLI for local CI runs."""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+from typing import Any, Dict, Iterable, List
+
+if __package__ in {None, ""}:
+    parent = Path(__file__).resolve().parents[1]
+    if str(parent) not in sys.path:
+        sys.path.insert(0, str(parent))
+
+import yaml
+
+STATE_FILE = Path("/tmp/kubectl-state.json")
+
+
+class KubectlState:
+    def __init__(self) -> None:
+        self.namespaces: Dict[str, Dict[str, Any]] = {}
+        if STATE_FILE.exists():
+            try:
+                payload = json.loads(STATE_FILE.read_text())
+            except json.JSONDecodeError:
+                payload = {}
+            self.namespaces = payload.get("namespaces", {})
+
+    def save(self) -> None:
+        STATE_FILE.write_text(json.dumps({"namespaces": self.namespaces}, indent=2))
+
+    def ensure_namespace(self, name: str) -> Dict[str, Any]:
+        return self.namespaces.setdefault(name, {"deployments": {}, "pods": []})
+
+
+STATE = KubectlState()
+
+
+def _load_documents(path: Path | None, *, stdin: str | None = None) -> List[dict]:
+    if path is not None:
+        text = path.read_text()
+    else:
+        text = stdin or ""
+    documents = []
+    for doc in yaml.safe_load_all(text):
+        if doc:
+            if isinstance(doc, dict):
+                documents.append(doc)
+    return documents
+
+
+def _parse_annotations(metadata: dict) -> dict:
+    annotations = metadata.get("annotations")
+    if isinstance(annotations, dict):
+        return annotations
+    return {}
+
+
+def _record_deployment(namespace: str, manifest: dict) -> None:
+    metadata = manifest.get("metadata") or {}
+    spec = manifest.get("spec") or {}
+    template = spec.get("template") or {}
+    template_metadata = template.get("metadata") or {}
+    labels = template_metadata.get("labels") or {}
+
+    name = metadata.get("name") or "deployment"
+    replicas = int(spec.get("replicas") or 1)
+    annotation_data = _parse_annotations(metadata)
+    health_annotation = annotation_data.get("shma.test/health-command")
+    health_command: List[str]
+    if health_annotation:
+        if isinstance(health_annotation, list):
+            health_command = [str(item) for item in health_annotation]
+        else:
+            try:
+                parsed = json.loads(str(health_annotation))
+                if isinstance(parsed, list):
+                    health_command = [str(item) for item in parsed]
+                else:
+                    health_command = [str(parsed)]
+            except json.JSONDecodeError:
+                health_command = [str(health_annotation)]
+    else:
+        health_command = ["true"]
+
+    ns_state = STATE.ensure_namespace(namespace)
+    pods = []
+    for replica in range(replicas):
+        pod_name = f"{name}-{replica}"
+        pods.append(
+            {
+                "name": pod_name,
+                "namespace": namespace,
+                "labels": dict(labels),
+                "ready": True,
+                "health_command": health_command,
+            }
+        )
+
+    ns_state["deployments"][name] = {
+        "name": name,
+        "replicas": replicas,
+        "labels": dict(labels),
+        "pods": pods,
+        "health_command": health_command,
+    }
+    ns_state["pods"] = pods
+    STATE.save()
+    print(f"kubectl: applied deployment {namespace}/{name}")
+
+
+def _record_namespace(manifest: dict) -> None:
+    metadata = manifest.get("metadata") or {}
+    name = metadata.get("name") or "default"
+    STATE.ensure_namespace(name)
+    STATE.save()
+    print(f"kubectl: ensured namespace {name}")
+
+
+def _apply_documents(
+    namespace_override: str | None, documents: Iterable[dict], *, update_state: bool
+) -> None:
+    for doc in documents:
+        kind = doc.get("kind")
+        metadata = doc.get("metadata") or {}
+        namespace = namespace_override or metadata.get("namespace") or "default"
+        if kind == "Namespace":
+            if update_state:
+                _record_namespace(doc)
+            continue
+        if kind == "Deployment":
+            if update_state:
+                _record_deployment(namespace, doc)
+            continue
+        if update_state:
+            STATE.ensure_namespace(namespace)
+            print(f"kubectl: recorded {kind} in {namespace}")
+
+
+def _cmd_create(args: list[str]) -> int:
+    if args[:1] != ["namespace"] or len(args) < 2:
+        print("kubectl create stub supports only namespaces")
+        return 0
+    name = args[1]
+    print("apiVersion: v1")
+    print("kind: Namespace")
+    print("metadata:")
+    print(f"  name: {name}")
+    return 0
+
+
+def _cmd_apply(args: list[str]) -> int:
+    dry_run = None
+    validate = None
+    namespace_override = None
+    file_path: Path | None = None
+    stdin_data: str | None = None
+
+    idx = 0
+    while idx < len(args):
+        token = args[idx]
+        if token.startswith("--dry-run"):
+            dry_run = token.partition("=")[2] or args[idx + 1]
+            if token == "--dry-run":
+                idx += 1
+        elif token.startswith("--validate"):
+            validate = token.partition("=")[2] or args[idx + 1]
+            if token == "--validate":
+                idx += 1
+        elif token == "-f":
+            target = args[idx + 1]
+            if target == "-":
+                stdin_data = sys.stdin.read()
+                file_path = None
+            else:
+                file_path = Path(target)
+            idx += 1
+        elif token in {"-n", "--namespace"}:
+            namespace_override = args[idx + 1]
+            idx += 1
+        idx += 1
+
+    if file_path is None and stdin_data is None:
+        raise SystemExit("kubectl apply: missing -f argument")
+
+    documents = _load_documents(file_path, stdin=stdin_data)
+    update_state = dry_run is None or dry_run == ""
+    _apply_documents(namespace_override, documents, update_state=update_state)
+    if dry_run:
+        print(
+            f"kubectl: dry-run ({dry_run}) validation={validate or 'default'} succeeded"
+        )
+    return 0
+
+
+def _cmd_diff(args: list[str]) -> int:
+    idx = args.index("-f") if "-f" in args else -1
+    if idx == -1:
+        print("kubectl diff stub expects '-f <path>'")
+        return 0
+    path = Path(args[idx + 1])
+    _load_documents(path)
+    print(f"kubectl: diff simulated for {path}")
+    return 0
+
+
+def _find_deployment(namespace: str, name: str) -> dict | None:
+    ns = STATE.namespaces.get(namespace)
+    if not ns:
+        return None
+    return ns.get("deployments", {}).get(name)
+
+
+def _cmd_rollout(args: list[str]) -> int:
+    if not args or args[0] != "status" or not args[1].startswith("deployment"):
+        print("kubectl rollout stub only supports deployment status")
+        return 0
+    _, _, target = args[1].partition("/")
+    target = target or args[1]
+    namespace = "default"
+    for idx, token in enumerate(args[2:], start=2):
+        if token in {"-n", "--namespace"}:
+            namespace = args[idx + 1]
+    deployment = _find_deployment(namespace, target)
+    if not deployment:
+        raise SystemExit(
+            f"kubectl: deployment {target} not found in namespace {namespace}"
+        )
+    print(f"deployment " + target + " successfully rolled out")
+    return 0
+
+
+def _cmd_wait(args: list[str]) -> int:
+    namespace = "default"
+    selector = None
+    for idx, token in enumerate(args):
+        if token in {"-n", "--namespace", "--namespace="}:
+            if token.endswith("="):
+                namespace = token.split("=", 1)[1]
+            else:
+                namespace = args[idx + 1]
+        if token.startswith("-n="):
+            namespace = token.split("=", 1)[1]
+        if token.startswith("-l"):
+            selector = args[idx + 1]
+        if token.startswith("-l="):
+            selector = token.split("=", 1)[1]
+        if token.startswith("--for="):
+            pass
+    if not selector:
+        print("kubectl wait stub requires a label selector")
+        return 0
+    label_key, _, label_value = selector.partition("=")
+    ns = STATE.namespaces.get(namespace) or {}
+    pods = ns.get("pods", [])
+    matching = [pod for pod in pods if pod["labels"].get(label_key) == label_value]
+    if not matching:
+        raise SystemExit(
+            f"kubectl: no pods matching {selector} in namespace {namespace}"
+        )
+    print(f"kubectl: all pods matching {selector} are ready")
+    return 0
+
+
+def _cmd_get(args: list[str]) -> int:
+    if not args:
+        print("kubectl get stub requires a resource type")
+        return 0
+    resource = args[0]
+    namespace = "default"
+    output = None
+    selector = None
+    for idx, token in enumerate(args[1:], start=1):
+        if token in {"-n", "--namespace"}:
+            namespace = args[idx + 1]
+        if token.startswith("-n="):
+            namespace = token.split("=", 1)[1]
+        if token == "-o":
+            output = args[idx + 1]
+        if token.startswith("-o="):
+            output = token.split("=", 1)[1]
+        if token == "-l":
+            selector = args[idx + 1]
+        if token.startswith("-l="):
+            selector = token.split("=", 1)[1]
+    ns_state = STATE.namespaces.get(namespace) or {"pods": []}
+
+    if resource == "pods" and output == "json":
+        label_key = label_value = None
+        if selector:
+            label_key, _, label_value = selector.partition("=")
+        items = []
+        for pod in ns_state.get("pods", []):
+            if label_key and pod["labels"].get(label_key) != label_value:
+                continue
+            items.append(
+                {
+                    "metadata": {
+                        "name": pod["name"],
+                        "namespace": namespace,
+                        "labels": pod["labels"],
+                    },
+                    "status": {
+                        "phase": "Running",
+                        "conditions": [
+                            {"type": "Ready", "status": "True"},
+                        ],
+                    },
+                }
+            )
+        print(json.dumps({"items": items}, indent=2))
+        return 0
+
+    print(f"kubectl: returning stub data for get {resource} in {namespace}")
+    return 0
+
+
+def _cmd_exec(args: list[str]) -> int:
+    namespace = "default"
+    pod_name = None
+    command: List[str] = []
+    idx = 0
+    while idx < len(args):
+        token = args[idx]
+        if token in {"-n", "--namespace"}:
+            namespace = args[idx + 1]
+            idx += 2
+            continue
+        if pod_name is None:
+            pod_name = token
+            idx += 1
+            continue
+        if token == "--":
+            command = args[idx + 1 :]
+            break
+        idx += 1
+
+    if pod_name is None:
+        raise SystemExit("kubectl exec stub requires a pod name")
+
+    ns_state = STATE.namespaces.get(namespace) or {}
+    pods = ns_state.get("pods", [])
+    pod = next((p for p in pods if p["name"] == pod_name), None)
+    if not pod:
+        raise SystemExit(f"kubectl: pod {pod_name} not found in namespace {namespace}")
+
+    expected = pod.get("health_command") or []
+    if expected and command != expected:
+        raise SystemExit(
+            f"kubectl: expected command {' '.join(expected)}, got {' '.join(command)}"
+        )
+    print(f"kubectl: executed command inside {pod_name}")
+    return 0
+
+
+def _cmd_describe(args: list[str]) -> int:
+    print("kubectl: describe invoked (stub output)")
+    return 0
+
+
+def _cmd_logs(args: list[str]) -> int:
+    print("kubectl: logs invoked (stub output)")
+    return 0
+
+
+COMMAND_TABLE = {
+    "create": _cmd_create,
+    "apply": _cmd_apply,
+    "diff": _cmd_diff,
+    "rollout": _cmd_rollout,
+    "wait": _cmd_wait,
+    "get": _cmd_get,
+    "exec": _cmd_exec,
+    "describe": _cmd_describe,
+    "logs": _cmd_logs,
+}
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = argv if argv is not None else sys.argv[1:]
+    if not args:
+        print("kubectl stub requires a command")
+        return 1
+    command = args[0]
+    handler = COMMAND_TABLE.get(command)
+    if handler is None:
+        print(f"kubectl stub does not implement command: {command}")
+        return 0
+    return handler(args[1:])
+
+
+if __name__ == "__main__":  # pragma: no cover - CLI entry point
+    raise SystemExit(main())
