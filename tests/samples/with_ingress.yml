@@ -1,18 +1,37 @@
 service_id: webapp
 service_name: Web Application
 service_image: ghcr.io/example/web@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+service_ip: &service_ip 198.51.100.25
+service_ports:
+  - target: 8000
+    published: 8000
+    host_ip: *service_ip
 exports:
   env:
     - name: BASE_URL
       value: https://web.example.test
+    - name: APP_FQDN
+      value: web.example.test
+    - name: APP_PORT
+      value: "8000"
+    - name: APP_BACKEND_IP
+      value: *service_ip
 mounts:
   persistent_volumes: []
   ephemeral_mounts: []
 health:
   cmd:
-    - /bin/true
+    - /usr/bin/env
+    - bash
+    - -c
+    - "curl --fail --silent http://127.0.0.1:8000/healthz"
 runtime_templates:
+  proxmox: ../templates/proxmox.yml.j2
+  docker: ../templates/docker.yml.j2
   podman: ../templates/podman.yml.j2
+  kubernetes: ../templates/kubernetes.yml.j2
+  baremetal: ../templates/baremetal.yml.j2
+needs_container_runtime: true
 ingress:
   enabled: true
   routes:

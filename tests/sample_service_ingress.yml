@@ -2,85 +2,29 @@ service_id: sample-service
 service_name: sample-service
 service_unit_name: sample-service
 service_image: docker.io/library/nginx@sha256:2ed85f18cb2c6b49e191bcb6bf12c0c07d63f3937a05d9f5234170d4f8df5c94
-service_ip: 192.0.2.50
+service_ip: &service_ip 192.0.2.50
 service_ports:
   - target: 8080
     published: 8080
-    host_ip: 192.0.2.50
+    host_ip: *service_ip
 secrets:
-  files:
+  shred_after_apply: true
+  items:
     - name: provided-cert
-      value: |-
-        -----BEGIN CERTIFICATE-----
-        MIIDDTCCAfWgAwIBAgIUBEHLfK7mg8oqGW8+4DnU9uyw5iowDQYJKoZIhvcNAQEL
-        BQAwFjEUMBIGA1UEAwwLZXhhbXBsZS5jb20wHhcNMjUxMDE4MjEzMTM3WhcNMjYx
-        MDE4MjEzMTM3WjAWMRQwEgYDVQQDDAtleGFtcGxlLmNvbTCCASIwDQYJKoZIhvcN
-        AQEBBQADggEPADCCAQoCggEBAJm58FGe8szkEDTxQgJofPGtO9RqrIYJh3SJPiKk
-        aE7B+3b9zmAL72t+CW3kplExRjiZ1AXv7TeJyJVjlP4WqhteqnFRrytfzD8XLbWC
-        AY0Qc788xTBhG3iftbwA2OuN5+oE2at/Z25AyWvlXTvs2tb0Ngb0XMR2WAT5M7Ux
-        LW+45RxnNSnLOiO64/PtHExEpx0ju43jv4rAkopiBS7kyJIx+hlYiWRsaG77IVji
-        q1SceiKIvrcWJyjweypuWeHtYJ/9y6D5iCxtTJCMIm2gMgNGh5Ee8LhbfeLW7xa3
-        k6muAh2fUGfnicjDdaw9B9ASNKxmhc6w1h1+6ROXsQyrBWcCAwEAAaNTMFEwHQYD
-        VR0OBBYEFOXFRwqvluMtASqmIplxwji+P4b1MB8GA1UdIwQYMBaAFOXFRwqvluMt
-        ASqmIplxwji+P4b1MA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEB
-        AAC0fn6N6c9WrAVQX5JmdcgLj2LtIDVeX8TPPCqR+1sJgIlPpi2Qid7i3Tp+Oq85
-        kuafaGnOY/ja1k1lrY+vblbyeEu5BO8UkH4loSb6SR78BLEl3e5j5vzgmzvKatS/
-        tbJlbuJjWdfiucCySadxYEIIfofLtf6twDJr+BYhzRg2fAigh+F3IFDMgVqDQl+T
-        SWv4BZuRQkRHR5xtVVQlGREVtlAMxusAjzcouDLPLH6qDEijQNHqKYEP2hQRxlSI
-        bBENoRUct3eEiVzBUfcdTa4a07ZBw6a12meyN+CgeeAJruLnDCzKLHbI/mC2z57t
-        MhORvg19YncUC/oSRl27mog=
-        -----END CERTIFICATE-----
+      type: file
+      content: "{{ vault_sample_ingress_tls_cert }}"
+      target: /etc/ingress/tls/provided.crt
+      mode: '0400'
     - name: provided-key
-      value: |-
-        -----BEGIN PRIVATE KEY-----
-        MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCZufBRnvLM5BA0
-        8UICaHzxrTvUaqyGCYd0iT4ipGhOwft2/c5gC+9rfglt5KZRMUY4mdQF7+03iciV
-        Y5T+FqobXqpxUa8rX8w/Fy21ggGNEHO/PMUwYRt4n7W8ANjrjefqBNmrf2duQMlr
-        5V077NrW9DYG9FzEdlgE+TO1MS1vuOUcZzUpyzojuuPz7RxMRKcdI7uN47+KwJKK
-        YgUu5MiSMfoZWIlkbGhu+yFY4qtUnHoiiL63Fico8Hsqblnh7WCf/cug+YgsbUyQ
-        jCJtoDIDRoeRHvC4W33i1u8Wt5OprgIdn1Bn54nIw3WsPQfQEjSsZoXOsNYdfukT
-        l7EMqwVnAgMBAAECggEAEIZpbAy/IwFdMKPCqcmbrMsnhFUXSK1bj051jHnJ8LVv
-        l8H+3lpKGW8KCnMq4c1/M/RtU1oQUQkRs+VpjcrX7GtHvTi/sNTyetG+CyX3jrd3
-        Cda5h9LYhiX8/kHFD8VIaeKtl37xmmuCe4PDev6iI7tK14KLOl9SZO54/YBU1w6J
-        a8jO8hVnvV4MmGcP5bdhzqgQ89PQuufqYbp5WDvZ8x31ukBMlI825H2lvFTF/+Ec
-        cj0FX69iSvZzroeWZmjU8Ekxp84HSyfbevlfFdGa0sJ3kX37XsaVjqyyykIU12qm
-        OUBKny8kCzsT+QgprHmDK/CdEhFYzggOO7v0Mh0GOQKBgQDUBM9/k5F9MLUFcGcd
-        q5ZOAM8k+kOWpF0hPSF5608ElgbsENRtDSFeVa2dAy1BweKLiib2gA/TbKzdFhs/
-        J2voum+NpMkvjtJFZVYenw/DWu3MnVYEFYoW1SGsW0GiTN9tbS1T2rJW3ecRX6lw
-        8iziaQEPbezke/tym+3eYAFhYwKBgQC5nYaIBepPXNiqkhIs0jMI6WOuvsReSlSR
-        6ORsyYTl7Pt1OZuEtVfHEPY5qU2xNScBn6HutRbl36FPMM2/RC5se3sO0ZN44H9/
-        RX0W6ebIsIMWmQeAy0zLMPJKlTOfZxKeSToj0MS5m7ZynLubo+TTUZy7W9g5mjb2
-        RnSElP+tLQKBgBfkJuGwZk+eInfnb6c3Q6usiasYDG+4O8pYEiKj8naI1WTajKVx
-        OlZf/z1XM01apMWmnrdePOpNL7mGGTHnplBGWfWzIPyb8nPhdG/k6qjP4UYSYLP7
-        l7xCi2vSHJk2pAA9Z02Tf2wV2Ur0nI9xJz0FBy5nUgi2oW9zkm33h1ApAoGAHeai
-        MGq5PnfzVr3bWnI3U8t5nKgbOXNaDn+sfNVWDFgHsn4n0LSs0FTo1WL6qhJiD/XY
-        OEKZME8xO9pZzVjwQxYY62RuQI3nCLILSJMmZ3Vf7/29u5fa0Xi1X7X/loWClXEr
-        x32qFGuwXipHGNVnQnXmbSsmScDJy0t5Qex+d2kCgYA8E9mq9PwSDWdS9y6ZJUtZ
-        TxPOQWS2Vf3u1Ocl6h+mkzFxy5SAVMf64oTe7EAJwF0TlqIvso/OoyBIlonM5hjb
-        RleLC70P21dXqZH67qN8V4Y1KlnS4o47sYIX5JSSrnwh25Z0e+iUOV675FdaP57o
-        fKqMBdY3nGTG9/ZPi7xyBQ==
-        -----END PRIVATE KEY-----
+      type: file
+      content: "{{ vault_sample_ingress_tls_key }}"
+      target: /etc/ingress/tls/provided.key
+      mode: '0400'
     - name: provided-ca
-      value: |-
-        -----BEGIN CERTIFICATE-----
-        MIIDDTCCAfWgAwIBAgIUBEHLfK7mg8oqGW8+4DnU9uyw5iowDQYJKoZIhvcNAQEL
-        BQAwFjEUMBIGA1UEAwwLZXhhbXBsZS5jb20wHhcNMjUxMDE4MjEzMTM3WhcNMjYx
-        MDE4MjEzMTM3WjAWMRQwEgYDVQQDDAtleGFtcGxlLmNvbTCCASIwDQYJKoZIhvcN
-        AQEBBQADggEPADCCAQoCggEBAJm58FGe8szkEDTxQgJofPGtO9RqrIYJh3SJPiKk
-        aE7B+3b9zmAL72t+CW3kplExRjiZ1AXv7TeJyJVjlP4WqhteqnFRrytfzD8XLbWC
-        AY0Qc788xTBhG3iftbwA2OuN5+oE2at/Z25AyWvlXTvs2tb0Ngb0XMR2WAT5M7Ux
-        LW+45RxnNSnLOiO64/PtHExEpx0ju43jv4rAkopiBS7kyJIx+hlYiWRsaG77IVji
-        q1SceiKIvrcWJyjweypuWeHtYJ/9y6D5iCxtTJCMIm2gMgNGh5Ee8LhbfeLW7xa3
-        k6muAh2fUGfnicjDdaw9B9ASNKxmhc6w1h1+6ROXsQyrBWcCAwEAAaNTMFEwHQYD
-        VR0OBBYEFOXFRwqvluMtASqmIplxwji+P4b1MB8GA1UdIwQYMBaAFOXFRwqvluMt
-        ASqmIplxwji+P4b1MA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEB
-        AAC0fn6N6c9WrAVQX5JmdcgLj2LtIDVeX8TPPCqR+1sJgIlPpi2Qid7i3Tp+Oq85
-        kuafaGnOY/ja1k1lrY+vblbyeEu5BO8UkH4loSb6SR78BLEl3e5j5vzgmzvKatS/
-        tbJlbuJjWdfiucCySadxYEIIfofLtf6twDJr+BYhzRg2fAigh+F3IFDMgVqDQl+T
-        SWv4BZuRQkRHR5xtVVQlGREVtlAMxusAjzcouDLPLH6qDEijQNHqKYEP2hQRxlSI
-        bBENoRUct3eEiVzBUfcdTa4a07ZBw6a12meyN+CgeeAJruLnDCzKLHbI/mC2z57t
-        MhORvg19YncUC/oSRl27mog=
-        -----END CERTIFICATE-----
+      type: file
+      content: "{{ vault_sample_ingress_ca_cert }}"
+      target: /etc/ingress/tls/provided-ca.crt
+      mode: '0400'
 ingress:
   enabled: true
   routes:
@@ -125,12 +69,25 @@ ingress:
         ca_secret: provided-ca
         required: true
 runtime_templates:
+  proxmox: ../templates/proxmox.yml.j2
+  docker: ../templates/docker.yml.j2
   podman: ../templates/podman.yml.j2
+  kubernetes: ../templates/kubernetes.yml.j2
+  baremetal: ../templates/baremetal.yml.j2
 exports:
-  env: []
+  env:
+    - name: APP_FQDN
+      value: sample.example.test
+    - name: APP_PORT
+      value: "8080"
+    - name: APP_BACKEND_IP
+      value: *service_ip
 mounts:
   persistent_volumes: []
   ephemeral_mounts: []
 health:
   cmd:
-    - /bin/true
+    - /usr/bin/env
+    - bash
+    - -c
+    - "curl --fail --silent http://127.0.0.1:8080/internal/health"

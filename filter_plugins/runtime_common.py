@@ -57,6 +57,21 @@ def ensure_env_entries(value: Any, *, context: str) -> List[Dict[str, Any]]:
     )
 
 
+def render_env_file(entries: Any) -> str:
+    """Render environment values into ``KEY=value`` lines suitable for ``.env`` files."""
+
+    rendered: List[str] = []
+    for entry in ensure_env_entries(entries, context="env file generation"):
+        name = entry.get("name")
+        if not name:
+            continue
+        value = entry.get("value", "")
+        rendered.append(f"{name}={'' if value is None else value}")
+    if not rendered:
+        return ""
+    return "\n".join(rendered) + "\n"
+
+
 def normalize_security(security: Any | None) -> Dict[str, Any]:
     src: Mapping[str, Any] = security or {}
     drop_caps = src.get("capabilities_drop", ["ALL"])
@@ -333,4 +348,5 @@ class FilterModule:
             "compose_environment": compose_environment,
             "merge_inline_environment": merge_inline_environment,
             "health_spec": health_spec,
+            "render_env_file": render_env_file,
         }

@@ -13,59 +13,21 @@
       - "'global' not in (opnsense_api_key | lower)"
     fail_msg: "opnsense_api_key must target the HAProxy subsystem instead of root/global access"
 
-- name: Initialize OPNsense payload containers
+- name: Build OPNsense HAProxy payloads
   set_fact:
-    opnsense_backends: []
-    opnsense_frontends: []
+    opnsense_haproxy_payloads: >-
+      {{ haproxy_payloads(
+           edge_ingress_backends | default([]),
+           opnsense_ingress_bind_addresses | default([]),
+           provider='opnsense',
+           certificate_ref=opnsense_tls_certificate_id
+         )
+      }}
 
-- name: Build OPNsense backend payloads
+- name: Extract OPNsense backend and frontend payloads
   set_fact:
-    opnsense_backends: "{{ opnsense_backends + [ backend_payload ] }}"
-  loop: "{{ edge_ingress_backends | default([]) }}"
-  loop_control:
-    loop_var: edge_backend
-  vars:
-    backend_payload: >-
-      {{ {
-        'name': edge_backend.service_id,
-        'mode': 'http',
-        'retries': 3,
-        'httpcheck_method': 'GET',
-        'httpcheck_path': edge_backend.path_prefix if edge_backend.path_prefix != '/' else '/',
-        'servers': [
-          {
-            'name': edge_backend.service_id + '-primary',
-            'address': edge_backend.exports.APP_BACKEND_IP,
-            'port': edge_backend.exports.APP_PORT,
-            'ssl': 'true' if edge_backend.scheme == 'https' else 'false',
-            'verify': 'false'
-          }
-        ]
-      } | to_json | from_json }}
-
-- name: Build OPNsense frontend payloads
-  set_fact:
-    opnsense_frontends: "{{ opnsense_frontends + [ frontend_payload ] }}"
-  loop: "{{ edge_ingress_backends | default([]) }}"
-  loop_control:
-    loop_var: edge_backend
-  vars:
-    frontend_payload: >-
-      {{ {
-        'name': edge_backend.router_name,
-        'mode': 'http',
-        'default_backend': edge_backend.service_id,
-        'rules': ([{'type': 'Host', 'value': edge_backend.exports.APP_FQDN}] + ([{'type': 'PathPrefix', 'value': edge_backend.path_prefix}] if edge_backend.path_prefix != '/' else [])),
-        'binds': [
-          {
-            'address': bind.address | string,
-            'port': bind.port | string,
-            'ssl': 'true' if bind.tls else 'false'
-          } for bind in opnsense_ingress_bind_addresses
-        ],
-        'tls_enabled': 'true' if edge_backend.tls else 'false',
-        'tls_certificate': opnsense_tls_certificate_id if opnsense_tls_certificate_id else ''
-      } | to_json | from_json }}
+    opnsense_backends: "{{ opnsense_haproxy_payloads.backends }}"
+    opnsense_frontends: "{{ opnsense_haproxy_payloads.frontends }}"
 
 - name: Push HAProxy configuration to OPNsense
   uri:
