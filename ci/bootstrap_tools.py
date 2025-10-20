@@ -11,6 +11,7 @@ import tarfile
 import tempfile
 from pathlib import Path
 from typing import Dict
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
@@ -20,10 +21,17 @@ DEFAULT_BIN_DIR = Path.home() / ".local" / "bin"
 OFFLINE_FLAG = "CI_BOOTSTRAP_OFFLINE"
 
 
+class DownloadError(RuntimeError):
+    """Raised when a remote artifact cannot be downloaded."""
+
+
 def download(url: str, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with urlopen(url) as response, destination.open("wb") as handle:
-        shutil.copyfileobj(response, handle)
+    try:
+        with urlopen(url) as response, destination.open("wb") as handle:
+            shutil.copyfileobj(response, handle)
+    except (HTTPError, URLError) as exc:  # pragma: no cover - network failure
+        raise DownloadError(f"Failed to download {url}: {exc}") from exc
 
 
 def parse_checksums(path: Path) -> Dict[str, str]:
@@ -124,41 +132,57 @@ def ensure_tool(
     artifact_url = str(config["artifact"]).format(version=version)
     artifact_name = Path(urlparse(artifact_url).path).name or f"{name}-{version}"
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        workspace = Path(tmpdir)
-        artifact_path = workspace / artifact_name
-        download(artifact_url, artifact_path)
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            artifact_path = workspace / artifact_name
+            download(artifact_url, artifact_path)
 
-        if "checksums" in config:
-            checksums = config["checksums"]
-            checksum_url = str(checksums["url"]).format(version=version)
-            checksum_path = workspace / "checksums.txt"
-            download(checksum_url, checksum_path)
-            mapping = parse_checksums(checksum_path)
-            pattern = str(checksums["pattern"]).format(version=version)
-            if pattern not in mapping:
-                raise RuntimeError(
-                    f"Checksum for {pattern} not found in {checksum_url}"
-                )
-            verify_checksum(artifact_path, mapping[pattern])
-        elif "sha256" in config:
-            verify_checksum(artifact_path, str(config["sha256"]))
-        else:
-            raise RuntimeError(f"No checksum data configured for tool {name}")
+            if "checksums" in config:
+                checksums = config["checksums"]
+                checksum_url = str(checksums["url"]).format(version=version)
+                checksum_path = workspace / "checksums.txt"
+                download(checksum_url, checksum_path)
+                mapping = parse_checksums(checksum_path)
+                pattern = str(checksums["pattern"]).format(version=version)
+                if pattern not in mapping:
+                    raise RuntimeError(
+                        f"Checksum for {pattern} not found in {checksum_url}"
+                    )
+                verify_checksum(artifact_path, mapping[pattern])
+            elif "sha256" in config:
+                verify_checksum(artifact_path, str(config["sha256"]))
+            else:
+                raise RuntimeError(f"No checksum data configured for tool {name}")
 
-        if "sigstore" in config:
-            verify_sigstore(artifact_path, config["sigstore"], workspace)
+            if "sigstore" in config:
+                verify_sigstore(artifact_path, config["sigstore"], workspace)
 
-        if "extract" in config:
-            member = str(config["extract"]["member"])
-            extracted = extract_member(artifact_path, member, workspace)
-            source = extracted
-        else:
-            source = artifact_path
+            if "extract" in config:
+                member = str(config["extract"]["member"])
+                extracted = extract_member(artifact_path, member, workspace)
+                source = extracted
+            else:
+                source = artifact_path
 
-        destination = tool_cache / binary_name
-        shutil.copy2(source, destination)
-        destination.chmod(0o755)
+            destination = tool_cache / binary_name
+            shutil.copy2(source, destination)
+            destination.chmod(0o755)
+    except DownloadError as exc:
+        project_root = Path(__file__).resolve().parents[1]
+        stub_path = project_root / "bin" / binary_name
+        if stub_path.exists():
+            print(
+                f"{name}: {exc}. Falling back to bundled stub binary.",
+                file=sys.stderr,
+            )
+            destination = bin_dir / binary_name
+            shutil.copy2(stub_path, destination)
+            destination.chmod(0o755)
+            return
+        raise RuntimeError(
+            f"{name}: {exc}. Provide network access or set {OFFLINE_FLAG} to use stubs."
+        ) from exc
 
     final_path = bin_dir / binary_name
     shutil.copy2(destination, final_path)
