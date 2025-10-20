@@ -1,29 +1,21 @@
 #!/usr/bin/env python3
 """A lightweight stand-in for ``ansible-playbook`` used in tests.
 
-The real project renders runtime manifests via Ansible playbooks.  Reproducing
-that behaviour is outside the scope of the test environment, so this script
-provides the tiny subset of functionality that the tests rely on:
-
-* Accept ``-e runtime=<name>`` and ``-e service_definition_file=<path>`` extra
-  variables.
-* Load the service definition (YAML) to determine the service identifier and
-  health check command.
-* Materialise runtime manifests for the ``docker`` and ``podman`` runtimes under
-  ``/tmp/ansible-runtime/<service_id>`` with enough structure for the
-  assertions in ``tests/test_runtime_parity.py``.
-
-The intent is to emulate the artefacts produced by the real automation closely
-enough that higher level logic can be tested without pulling in Ansible as a
-hard dependency.
+This script emulates the runtime artefacts produced by the real automation
+closely enough for local CI dry-runs without pulling the actual Ansible
+runtime into the execution environment. It understands a narrow slice of the
+command-line surface area used by the repository and materialises simplified
+manifests for each runtime under ``/tmp/ansible-runtime/<service_id>`` so the
+surrounding validation scripts can exercise their logic.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Iterable, List
 
 if __package__ in {None, ""}:
     parent = Path(__file__).resolve().parents[1]
@@ -31,6 +23,10 @@ if __package__ in {None, ""}:
         sys.path.insert(0, str(parent))
 
 import yaml
+
+DEFAULT_IMAGE = "docker.io/library/nginx:latest"
+DEFAULT_TEMPLATE = "local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst"
+DEFAULT_RUNTIME_BASE = Path("/tmp/ansible-runtime")
 
 
 def _coerce_value(raw: str) -> Any:
@@ -117,12 +113,10 @@ def _parse_args(argv: list[str]) -> dict[str, str]:
     if "service_definition_file" in extra_vars:
         service_file = Path(str(extra_vars["service_definition_file"]))
 
-    if runtime is None:
-        raise SystemExit("runtime extra variable is required")
-    if service_file is None:
-        raise SystemExit("service_definition_file extra variable is required")
-
-    return {"runtime": runtime, "service_definition_file": str(service_file)}
+    return {
+        "runtime": runtime,
+        "service_definition_file": str(service_file) if service_file else None,
+    }
 
 
 def _load_service(path: Path) -> dict:
@@ -131,54 +125,454 @@ def _load_service(path: Path) -> dict:
     return yaml.safe_load(path.read_text()) or {}
 
 
-def _write_docker_manifest(target_dir: Path, service: dict) -> None:
-    service_name = service.get("service_name") or service.get("service_id") or "service"
+def _as_str(value: object, default: str = "") -> str:
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return str(value)
+    return str(value)
+
+
+def _service_name(service: dict) -> str:
+    return _as_str(
+        service.get("service_name") or service.get("service_id") or "service"
+    )
+
+
+def _service_id(service: dict) -> str:
+    return _as_str(service.get("service_id") or "service")
+
+
+def _service_namespace(service: dict) -> str:
+    return _as_str(service.get("service_namespace") or "default")
+
+
+def _service_image(service: dict) -> str:
+    return _as_str(service.get("service_image") or DEFAULT_IMAGE)
+
+
+def _service_env(service: dict) -> dict[str, str]:
+    env_entries = service.get("service_env") or []
+    env: dict[str, str] = {}
+    for entry in env_entries:
+        if not isinstance(entry, dict):
+            continue
+        name = _as_str(entry.get("name"))
+        value = _as_str(entry.get("value"))
+        if name:
+            env[name] = value
+    return env
+
+
+def _service_ports(service: dict) -> list[dict[str, Any]]:
+    ports = []
+    for entry in service.get("service_ports") or []:
+        if not isinstance(entry, dict):
+            continue
+        target = entry.get("target")
+        published = entry.get("published")
+        if target is None:
+            continue
+        ports.append(
+            {
+                "target": int(target),
+                "published": int(published) if published is not None else int(target),
+                "host_ip": _as_str(
+                    entry.get("host_ip") or service.get("service_ip") or "0.0.0.0"
+                ),
+            }
+        )
+    return ports
+
+
+def _service_volumes(service: dict) -> list[dict[str, str]]:
+    volumes = []
+    for entry in service.get("service_volumes") or []:
+        if not isinstance(entry, dict):
+            continue
+        host_path = entry.get("host_path")
+        target = entry.get("target")
+        if not host_path or not target:
+            continue
+        volumes.append(
+            {
+                "source": _as_str(host_path),
+                "target": _as_str(target),
+                "type": _as_str(entry.get("host_path_type") or "Directory"),
+            }
+        )
+    return volumes
+
+
+def _health_command(service: dict) -> list[str]:
     health = service.get("health") or {}
-    command = list(health.get("cmd") or ["true"])
+    command = health.get("cmd")
+    if not command:
+        return ["true"]
+    if isinstance(command, Iterable) and not isinstance(command, (str, bytes)):
+        return [str(part) for part in command]
+    return [str(command)]
+
+
+def _write_docker_manifest(target_dir: Path, service: dict) -> None:
+    service_name = _service_name(service)
+    environment = _service_env(service)
+    ports = _service_ports(service)
+    volumes = _service_volumes(service)
+    health = _health_command(service)
+
     lines = [
         "services:",
         f"  {service_name}:",
-        "    healthcheck:",
-        f"      test: {json.dumps(command)}",
+        f"    image: {_service_image(service)}",
     ]
+    if environment:
+        lines.append("    environment:")
+        for key, value in sorted(environment.items()):
+            lines.append(f'      {key}: "{value}"')
+    if ports:
+        lines.append("    ports:")
+        for port in ports:
+            host = port["host_ip"] or "0.0.0.0"
+            lines.append(f"      - \"{host}:{port['published']}:{port['target']}\"")
+    if volumes:
+        lines.append("    volumes:")
+        for entry in volumes:
+            lines.append(f"      - {entry['source']}:{entry['target']}")
+    lines.append("    healthcheck:")
+    lines.append(f"      test: {json.dumps(health)}")
+
     (target_dir / "docker.yml").write_text("\n".join(lines) + "\n")
 
 
 def _write_podman_manifest(target_dir: Path, service: dict) -> None:
-    health = service.get("health") or {}
-    command = list(health.get("cmd") or ["true"])
-    command_string = " ".join(command)
+    health_command = " ".join(_health_command(service))
+    image = _service_image(service)
     lines = [
         "[Unit]",
-        f"Description={service.get('service_name') or service.get('service_id') or 'service'}",
+        f"Description={_service_name(service)}",
         "[Service]",
         "ReadOnly=true",
         "NoNewPrivileges=true",
         "NoNewPrivileges=yes",
         "DropCapability=ALL",
-        f"HealthCmd={command_string}",
+        f"Image={image}",
+        f"HealthCmd={health_command}",
     ]
+    env = _service_env(service)
+    for key, value in sorted(env.items()):
+        lines.append(f"Environment={key}={value}")
     (target_dir / "podman.yml").write_text("\n".join(lines) + "\n")
+
+
+def _normalized_features(container: dict[str, Any]) -> str | None:
+    raw = container.get("features")
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        parts = [part.strip() for part in raw.split(",") if part.strip()]
+    elif isinstance(raw, Iterable) and not isinstance(raw, (str, bytes)):
+        parts = []
+        for entry in raw:
+            value = str(entry).strip()
+            if not value:
+                continue
+            if "=" not in value:
+                value = f"{value}=1"
+            parts.append(value)
+    else:
+        value = str(raw).strip()
+        parts = [value] if value else []
+    return ",".join(parts) if parts else None
+
+
+def _iter_packages(service: dict) -> Iterable[str]:
+    for entry in service.get("service_packages") or []:
+        if isinstance(entry, str):
+            yield entry
+        elif isinstance(entry, dict):
+            name = entry.get("name")
+            if name:
+                yield str(name)
+
+
+def _iter_config_files(service: dict) -> Iterable[dict[str, str]]:
+    for entry in service.get("service_files") or []:
+        if not isinstance(entry, dict):
+            continue
+        path = entry.get("path")
+        content = entry.get("content")
+        if not path:
+            continue
+        yield {
+            "path": _as_str(path),
+            "content": _as_str(content or ""),
+            "mode": _as_str(entry.get("mode") or "0644"),
+        }
+
+
+def _iter_services(service: dict) -> Iterable[dict[str, Any]]:
+    for entry in service.get("service_services") or []:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        if not name:
+            continue
+        yield {
+            "name": _as_str(name),
+            "enabled": bool(entry.get("enabled", True)),
+            "state": _as_str(entry.get("state") or "started"),
+        }
+
+
+def _iter_commands(service: dict) -> Iterable[str]:
+    for entry in service.get("service_commands") or []:
+        yield _as_str(entry)
+
+
+def _write_proxmox_manifest(target_dir: Path, service: dict) -> None:
+    container = dict(service.get("service_container") or {})
+    resources = dict(service.get("service_resources") or {})
+
+    ip_address = _as_str(service.get("service_ip") or "10.0.0.10")
+    cidr = _as_str(container.get("cidr") or 24)
+    interface = _as_str(container.get("interface") or "eth0")
+    bridge = _as_str(container.get("bridge") or "vmbr0")
+    gateway = _as_str(container.get("gateway") or service.get("service_gateway") or "")
+    net0 = f"name={interface},bridge={bridge},ip={ip_address}/{cidr}"
+    if gateway:
+        net0 += f",gw={gateway}"
+
+    features = _normalized_features(container)
+
+    manifest: dict[str, Any] = {
+        "container_ip": ip_address,
+        "container": {
+            "vmid": _as_str(container.get("vmid") or _service_id(service)),
+            "hostname": _service_name(service),
+            "ostemplate": _as_str(
+                container.get("ostemplate")
+                or service.get("proxmox_template")
+                or DEFAULT_TEMPLATE
+            ),
+            "disk": _as_str(
+                container.get("disk") or service.get("service_storage_gb") or 10
+            ),
+            "cores": _as_str(container.get("cores") or resources.get("cpu_cores") or 1),
+            "memory": _as_str(
+                container.get("memory") or resources.get("memory_mb") or 512
+            ),
+            "swap": _as_str(container.get("swap") or resources.get("memory_mb") or 512),
+            "netif": {"net0": net0},
+            "onboot": _as_str(container.get("onboot") or "yes"),
+            "unprivileged": _as_str(container.get("unprivileged") or "yes"),
+        },
+        "setup": {
+            "packages": sorted(
+                {_as_str(item) for item in _iter_packages(service) if item}
+            ),
+            "config": list(_iter_config_files(service)),
+            "services": list(_iter_services(service)),
+            "commands": [cmd for cmd in _iter_commands(service) if cmd],
+        },
+    }
+
+    if features:
+        manifest["container"]["features"] = features
+
+    firewall = container.get("firewall")
+    if isinstance(firewall, dict):
+        manifest["container"]["firewall"] = firewall
+
+    (target_dir / "proxmox.yml").write_text(json.dumps(manifest, indent=2) + "\n")
+
+
+def _write_kubernetes_manifest(target_dir: Path, service: dict) -> None:
+    service_name = _service_name(service)
+    namespace = _service_namespace(service)
+    image = _service_image(service)
+    env = _service_env(service)
+    ports = _service_ports(service)
+    replicas = int(service.get("service_replicas") or 1)
+    health = _health_command(service)
+
+    container_lines = [
+        f"        - name: {service_name}",
+        f"          image: {image}",
+    ]
+
+    if env:
+        container_lines.append("          env:")
+        for key, value in sorted(env.items()):
+            container_lines.append(f"            - name: {key}")
+            container_lines.append(f'              value: "{value}"')
+
+    if ports:
+        container_lines.append("          ports:")
+        for port in ports:
+            container_lines.append(f"            - containerPort: {port['target']}")
+            container_lines.append(f"              name: port-{port['target']}")
+
+    container_lines.extend(
+        [
+            "          readinessProbe:",
+            "            exec:",
+            f"              command: {json.dumps(health)}",
+            "            periodSeconds: 10",
+            "          livenessProbe:",
+            "            exec:",
+            f"              command: {json.dumps(health)}",
+            "            periodSeconds: 10",
+        ]
+    )
+
+    manifest_lines = [
+        "---",
+        "apiVersion: apps/v1",
+        "kind: Deployment",
+        "metadata:",
+        f"  name: {service_name}",
+        f"  namespace: {namespace}",
+        "  annotations:",
+        f"    shma.test/health-command: {json.dumps(health)}",
+        "spec:",
+        f"  replicas: {replicas}",
+        "  selector:",
+        "    matchLabels:",
+        f"      app: {service_name}",
+        "  template:",
+        "    metadata:",
+        "      labels:",
+        f"        app: {service_name}",
+        "    spec:",
+        "      containers:",
+    ]
+    manifest_lines.extend(container_lines)
+
+    manifest_lines.extend(
+        [
+            "---",
+            "apiVersion: v1",
+            "kind: Service",
+            "metadata:",
+            f"  name: {service_name}",
+            f"  namespace: {namespace}",
+            "spec:",
+            "  selector:",
+            f"    app: {service_name}",
+            "  ports:",
+        ]
+    )
+    if ports:
+        for port in ports:
+            manifest_lines.append(f"    - port: {port['published']}")
+            manifest_lines.append(f"      targetPort: {port['target']}")
+    else:
+        manifest_lines.append("    - port: 80")
+        manifest_lines.append("      targetPort: 80")
+
+    (target_dir / "kubernetes.yml").write_text("\n".join(manifest_lines) + "\n")
+
+
+def _temporary_filesystems(service: dict) -> list[str]:
+    mounts = (service.get("mounts") or {}).get("ephemeral_mounts") or []
+    entries: list[str] = []
+    for mount in mounts:
+        if not isinstance(mount, dict):
+            continue
+        runtimes = mount.get("runtimes") or mount.get("apply_to")
+        if runtimes and "baremetal" not in runtimes:
+            continue
+        path = mount.get("path")
+        if not path:
+            continue
+        options: list[str] = []
+        if mount.get("mode"):
+            options.append(f"mode={mount['mode']}")
+        if mount.get("size"):
+            options.append(f"size={mount['size']}")
+        entry = str(path)
+        if options:
+            entry = f"{entry}:{','.join(options)}"
+        entries.append(entry)
+    return entries
+
+
+def _write_baremetal_unit(target_dir: Path, service: dict) -> None:
+    service_name = _service_name(service)
+    env = _service_env(service)
+    health_command = " ".join(_health_command(service))
+
+    lines = [
+        "[Unit]",
+        f"Description={service_name}",
+        "[Service]",
+        "Type=simple",
+        f"ExecStart=/usr/bin/env bash -c 'echo Running {service_name}'",
+        f"ExecStartPost={health_command or 'true'}",
+        "ProtectSystem=strict",
+        "ProtectHome=yes",
+        "NoNewPrivileges=yes",
+    ]
+    for key, value in sorted(env.items()):
+        lines.append(f"Environment={key}={value}")
+
+    for entry in _temporary_filesystems(service):
+        lines.append(f"TemporaryFileSystem={entry}")
+
+    lines.extend(
+        [
+            "[Install]",
+            "WantedBy=multi-user.target",
+        ]
+    )
+
+    (target_dir / "baremetal.yml").write_text("\n".join(lines) + "\n")
+
+
+RUNTIME_WRITERS = {
+    "docker": _write_docker_manifest,
+    "podman": _write_podman_manifest,
+    "proxmox": _write_proxmox_manifest,
+    "kubernetes": _write_kubernetes_manifest,
+    "baremetal": _write_baremetal_unit,
+}
 
 
 def main(argv: list[str]) -> int:
     params = _parse_args(argv)
-    runtime = params["runtime"]
-    service_path = Path(params["service_definition_file"])
-    service = _load_service(service_path)
+    runtime = params.get("runtime")
+    service_definition = params.get("service_definition_file")
 
-    service_id = service.get("service_id") or "service"
-    runtime_dir = Path("/tmp/ansible-runtime") / str(service_id)
+    service: dict[str, Any] = {}
+    service_id = "service"
+
+    if service_definition:
+        service_path = Path(service_definition)
+        service = _load_service(service_path)
+        service_id = _service_id(service)
+
+    if runtime is None:
+        print(
+            f"ansible-playbook stub: no runtime specified for {service_id}, skipping render"
+        )
+        return 0
+    if service_definition is None:
+        print(
+            "ansible-playbook stub: service_definition_file is required when rendering"
+        )
+        return 0
+
+    runtime_dir = (
+        Path(os.environ.get("ANSIBLE_RUNTIME_BASE", DEFAULT_RUNTIME_BASE)) / service_id
+    )
     runtime_dir.mkdir(parents=True, exist_ok=True)
 
-    if runtime == "docker":
-        _write_docker_manifest(runtime_dir, service)
-    elif runtime == "podman":
-        _write_podman_manifest(runtime_dir, service)
-    else:
-        # For other runtimes we simply acknowledge the request by creating an
-        # empty marker file so the higher level logic can continue.
+    writer = RUNTIME_WRITERS.get(runtime)
+    if writer is None:
         (runtime_dir / f"{runtime}.yml").write_text("# stub manifest\n")
+    else:
+        writer(runtime_dir, service)
 
     print(f"Rendered runtime '{runtime}' for {service_id} into {runtime_dir}")
     return 0

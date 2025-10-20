@@ -8,11 +8,11 @@ from pathlib import Path
 
 import json
 
-if __package__ in {None, ""}:  # pragma: no cover - compatibility for CLI execution
+try:  # pragma: no cover - import for package execution
+    from .messages import FEATURES_REQUIRE_RUNTIME_MESSAGE
+except ImportError:  # pragma: no cover - CLI fallback
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from ci.messages import FEATURES_REQUIRE_RUNTIME_MESSAGE
-else:  # pragma: no cover - module import within package context
-    from .messages import FEATURES_REQUIRE_RUNTIME_MESSAGE
 
 try:  # pragma: no cover - exercised via fallback in tests when PyYAML is absent
     import yaml
@@ -32,8 +32,6 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for minimal test envs
         def validate(self, instance: dict) -> None:
             return None
 
-
-from .messages import FEATURES_REQUIRE_RUNTIME_MESSAGE
 
 ALLOWED_LXC_FEATURES = {"nesting", "keyctl", "fuse", "mount"}
 VALID_FIREWALL_ACTIONS = {"ACCEPT", "DROP", "REJECT"}

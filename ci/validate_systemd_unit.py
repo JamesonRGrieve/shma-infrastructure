@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Dict, Iterable, List
 
-import yaml
+if __package__ in {None, ""}:  # pragma: no cover - CLI fallback
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    import yaml
+else:  # pragma: no cover - package import
+    import yaml
 
 DEFAULT_APPLY_TARGETS = ["docker", "podman", "kubernetes", "proxmox", "baremetal"]
 

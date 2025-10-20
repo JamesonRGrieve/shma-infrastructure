@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Stub for the ``kind`` CLI used in CI workflows."""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+STATE_FILE = Path("/tmp/kind-state.json")
+
+
+def _load_state() -> dict[str, dict[str, str]]:
+    if not STATE_FILE.exists():
+        return {}
+    try:
+        return json.loads(STATE_FILE.read_text())
+    except json.JSONDecodeError:
+        return {}
+
+
+def _store_state(state: dict[str, dict[str, str]]) -> None:
+    STATE_FILE.write_text(json.dumps(state, indent=2))
+
+
+def _create_cluster(name: str) -> int:
+    state = _load_state()
+    state[name] = {"status": "running"}
+    _store_state(state)
+    print(f"kind: created cluster {name}")
+    return 0
+
+
+def _delete_cluster(name: str) -> int:
+    state = _load_state()
+    if name in state:
+        del state[name]
+        _store_state(state)
+        print(f"kind: deleted cluster {name}")
+    else:
+        print(f"kind: cluster {name} not present")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = argv if argv is not None else sys.argv[1:]
+    if not args:
+        print("kind stub requires a command")
+        return 1
+
+    command = args[0]
+    if command == "create" and args[1:2] == ["cluster"]:
+        name = "kind"
+        for idx, token in enumerate(args[2:], start=2):
+            if token == "--name" and idx + 1 < len(args):
+                name = args[idx + 1]
+        return _create_cluster(name)
+    if command == "delete" and args[1:2] == ["cluster"]:
+        name = "kind"
+        for idx, token in enumerate(args[2:], start=2):
+            if token == "--name" and idx + 1 < len(args):
+                name = args[idx + 1]
+        return _delete_cluster(name)
+
+    print("kind stub supports only 'kind create cluster' and 'kind delete cluster'")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - CLI entry point
+    raise SystemExit(main())

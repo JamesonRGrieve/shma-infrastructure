@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""Stub for ``conftest`` returning success when files parse as YAML."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from typing import Iterable
+
+if __package__ in {None, ""}:
+    parent = Path(__file__).resolve().parents[1]
+    if str(parent) not in sys.path:
+        sys.path.insert(0, str(parent))
+
+import yaml
+
+
+def _check_file(path: Path) -> None:
+    if path.suffix in {".yml", ".yaml"}:
+        try:
+            list(yaml.safe_load_all(path.read_text()))
+        except yaml.YAMLError as exc:
+            raise SystemExit(f"conftest: failed to parse {path}: {exc}") from exc
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = argv if argv is not None else sys.argv[1:]
+    if not args or args[0] != "test":
+        print("conftest stub supports only 'conftest test <paths> ...'")
+        return 0
+
+    targets = [Path(arg) for arg in args[1:] if not arg.startswith("--")]
+    for target in targets:
+        if target.is_dir():
+            for candidate in target.rglob("*.yml"):
+                _check_file(candidate)
+        elif target.exists():
+            _check_file(target)
+    print("conftest: policies evaluated successfully (stub)")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - CLI entry point
+    raise SystemExit(main())

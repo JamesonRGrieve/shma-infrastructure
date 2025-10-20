@@ -4,11 +4,14 @@ import sys
 from argparse import ArgumentParser
 from pathlib import Path
 
-import yaml
-from jsonschema import Draft202012Validator, ValidationError
+if __package__ in {None, ""}:  # pragma: no cover - CLI execution fallback
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from ci.messages import FEATURES_REQUIRE_RUNTIME_MESSAGE
+else:  # pragma: no cover - package import path
+    from .messages import FEATURES_REQUIRE_RUNTIME_MESSAGE
 
-from .messages import FEATURES_REQUIRE_RUNTIME_MESSAGE
-from jsonschema import RefResolver
+import yaml
+from jsonschema import Draft202012Validator, RefResolver, ValidationError
 
 
 def load_yaml(path: Path) -> dict:

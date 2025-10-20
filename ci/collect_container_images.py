@@ -5,7 +5,11 @@ import sys
 from pathlib import Path
 from typing import Iterable, Set
 
-import yaml
+if __package__ in {None, ""}:  # pragma: no cover - CLI fallback
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    import yaml
+else:  # pragma: no cover - package import
+    import yaml
 
 
 def _iter_image_values(node: object) -> Iterable[str]:

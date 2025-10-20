@@ -9,7 +9,11 @@ import time
 from pathlib import Path
 from typing import Dict, List
 
-import yaml
+if __package__ in {None, ""}:  # pragma: no cover - CLI fallback
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    import yaml
+else:  # pragma: no cover - package import
+    import yaml
 
 DEFAULT_CONFIG_PATH = Path("ci/benchmark_config.yml")
 

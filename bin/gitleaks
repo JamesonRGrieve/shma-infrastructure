@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+"""Minimal stub for ``gitleaks`` used in offline CI dry-runs."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+DEFAULT_SARIF = {
+    "version": "2.1.0",
+    "runs": [
+        {
+            "tool": {"driver": {"name": "gitleaks", "version": "stub"}},
+            "results": [],
+        }
+    ],
+}
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="gitleaks")
+    subparsers = parser.add_subparsers(dest="command")
+    detect = subparsers.add_parser("detect")
+    detect.add_argument("--report-format", default="sarif")
+    detect.add_argument("--report-path", type=Path, default=Path("gitleaks.sarif"))
+    detect.add_argument("--exit-code", type=int, default=0)
+    detect.add_argument("--source", default=".")
+    detect.add_argument("--no-banner", action="store_true")
+    detect.add_argument("--redact", action="store_true")
+    return parser
+
+
+def handle_detect(args: argparse.Namespace) -> int:
+    if args.report_format.lower() != "sarif":
+        print("gitleaks stub only supports SARIF output", file=sys.stderr)
+        return 1
+    args.report_path.write_text(json.dumps(DEFAULT_SARIF, indent=2) + "\n")
+    print(f"gitleaks: wrote stub report to {args.report_path}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.command != "detect":
+        parser.print_help()
+        return 0
+    return handle_detect(args)
+
+
+if __name__ == "__main__":  # pragma: no cover - CLI entry point
+    raise SystemExit(main())

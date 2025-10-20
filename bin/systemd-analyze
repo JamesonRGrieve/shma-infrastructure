@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""Stub for ``systemd-analyze verify``."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+
+def verify_unit(path: Path) -> int:
+    text = path.read_text()
+    if "[Unit]" not in text or "[Service]" not in text:
+        print(f"systemd-analyze: {path} missing required sections", file=sys.stderr)
+        return 1
+    print(f"systemd-analyze: verified {path}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = argv if argv is not None else sys.argv[1:]
+    if args[:1] != ["verify"] or len(args) != 2:
+        print("systemd-analyze stub supports only 'systemd-analyze verify <unit>'")
+        return 0
+    return verify_unit(Path(args[1]))
+
+
+if __name__ == "__main__":  # pragma: no cover - CLI entry point
+    raise SystemExit(main())
