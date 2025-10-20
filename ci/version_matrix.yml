@@ -55,7 +55,7 @@
     "conftest": {
       "version": "0.48.0",
       "artifact": "https://github.com/open-policy-agent/conftest/releases/download/v{version}/conftest_{version}_Linux_x86_64.tar.gz",
-      "sha256": "f3f9fa4c8ad5ac2ffb5f3eeb8000d10a229cc3f0e96a4b8b3b3aa259b91c8d1d",
+      "sha256": "1fbafb8dc6e142bd66d19aad471b3ff43df1a6a774389d7b7c1a47608bdaf3e7",
       "sigstore": {
         "signature": "https://github.com/open-policy-agent/conftest/releases/download/v{version}/conftest_{version}_Linux_x86_64.tar.gz.sig",
         "certificate": "https://github.com/open-policy-agent/conftest/releases/download/v{version}/conftest_{version}_Linux_x86_64.tar.gz.pem",
