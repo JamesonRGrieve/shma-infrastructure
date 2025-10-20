@@ -10,10 +10,15 @@ import sys
 import tarfile
 import tempfile
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import urlopen
+
+try:
+    import yaml
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    yaml = None
 
 DEFAULT_CONFIG = Path("ci/version_matrix.yml")
 DEFAULT_CACHE_DIR = Path.home() / ".cache" / "ci-tools"
@@ -56,11 +61,15 @@ def verify_checksum(artifact: Path, expected: str) -> None:
         )
 
 
-def verify_sigstore(artifact: Path, config: Dict[str, str], workspace: Path) -> None:
+def verify_sigstore(
+    artifact: Path, config: Mapping[str, object], workspace: Path, *, version: str
+) -> None:
     signature_path = workspace / "signature"
     certificate_path = workspace / "certificate"
-    download(config["signature"], signature_path)
-    download(config["certificate"], certificate_path)
+    signature_url = str(config["signature"]).format(version=version)
+    certificate_url = str(config["certificate"]).format(version=version)
+    download(signature_url, signature_path)
+    download(certificate_url, certificate_path)
 
     identity = config.get("identity_regexp")
     oidc = config.get("oidc_issuer", "https://token.actions.githubusercontent.com")
@@ -101,7 +110,7 @@ def extract_member(archive: Path, member: str, workspace: Path) -> Path:
 
 
 def ensure_tool(
-    name: str, config: Dict[str, object], cache_dir: Path, bin_dir: Path
+    name: str, config: Mapping[str, object], cache_dir: Path, bin_dir: Path
 ) -> None:
     version = str(config["version"])
     binary_name = str(config["binary"])
@@ -156,7 +165,17 @@ def ensure_tool(
                 raise RuntimeError(f"No checksum data configured for tool {name}")
 
             if "sigstore" in config:
-                verify_sigstore(artifact_path, config["sigstore"], workspace)
+                sigstore_config = config["sigstore"]
+                if not isinstance(sigstore_config, Mapping):
+                    raise RuntimeError(
+                        f"sigstore configuration for {name} must be a mapping"
+                    )
+                verify_sigstore(
+                    artifact_path,
+                    sigstore_config,
+                    workspace,
+                    version=version,
+                )
 
             if "extract" in config:
                 member = str(config["extract"]["member"])
@@ -218,13 +237,22 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
-    config = json.loads(args.config.read_text(encoding="utf-8"))
-    tools = config.get("tools", {})
-    if not tools:
+    config_text = args.config.read_text(encoding="utf-8")
+    if yaml is not None:
+        raw_config = yaml.safe_load(config_text)
+    else:
+        raw_config = json.loads(config_text)
+    if not isinstance(raw_config, Mapping):
+        raise RuntimeError("Configuration file must contain a mapping at the top level")
+
+    tools = raw_config.get("tools")
+    if not isinstance(tools, Mapping) or not tools:
         print("No tools defined in configuration", file=sys.stderr)
         return 1
 
     for name, tool_config in tools.items():
+        if not isinstance(tool_config, Mapping):
+            raise RuntimeError(f"Configuration for tool {name} must be a mapping")
         ensure_tool(name, tool_config, args.cache_dir, args.bin_dir)
 
     return 0
