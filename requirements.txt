@@ -1,8 +1,8 @@
-ansible==9.5.1
-ansible-lint==24.9.0
-check-jsonschema==0.28.4
+ansible==12.1.0
+ansible-lint==25.9.2
+check-jsonschema==0.34.1
 jsonschema==4.23.0
-pre-commit==3.8.0
+pre-commit==4.3.0
 pyyaml==6.0.2
 yamllint==1.35.1
-sigstore==2.1.1
+sigstore==4.1.0
